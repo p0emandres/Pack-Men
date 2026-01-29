@@ -780,7 +780,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
   }
 
   // Poll match status until both players have joined
-  const pollMatchStatus = async (matchId: string, accessToken: string) => {
+  const pollMatchStatus = (matchId: string, accessToken: string): (() => void) => {
     const apiBaseUrl = import.meta.env.VITE_API_URL || ''
     const maxAttempts = 60 // Poll for up to 60 seconds
     let attempts = 0
@@ -894,7 +894,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
   }, [])
 
   // Poll ready status until both players are ready
-  const pollReadyStatus = async (matchId: string, accessToken: string) => {
+  const pollReadyStatus = (matchId: string, accessToken: string): (() => void) => {
     const apiBaseUrl = import.meta.env.VITE_API_URL || ''
     const maxAttempts = 300 // Poll for up to 5 minutes
     let attempts = 0

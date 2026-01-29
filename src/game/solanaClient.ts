@@ -1,6 +1,5 @@
-import { PublicKey, Connection, Transaction, sendAndConfirmTransaction } from '@solana/web3.js'
+import { PublicKey, Connection, Transaction } from '@solana/web3.js'
 import { Program, AnchorProvider, Wallet, BN } from '@coral-xyz/anchor'
-import type { DroogGame } from '../types/anchor'
 import { DroogGameIDL } from './anchorIdl'
 import { getCurrentMatchTime } from './timeUtils'
 
@@ -28,8 +27,11 @@ export interface CustomerState {
   lastServedBy: PublicKey | null
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyProgram = Program<any>
+
 export class DroogGameClient {
-  private program: Program<DroogGame>
+  private program: AnyProgram
   private connection: Connection
   private provider: AnchorProvider
 
@@ -38,7 +40,9 @@ export class DroogGameClient {
     this.provider = new AnchorProvider(connection, wallet, {
       commitment: 'confirmed',
     })
-    this.program = new Program(DroogGameIDL, PROGRAM_ID, this.provider)
+    // Use type assertion for legacy IDL format compatibility
+    // Note: Anchor 0.30+ changed the Program constructor signature
+    this.program = new Program(DroogGameIDL as any, this.provider)
   }
 
   /**
@@ -63,7 +67,7 @@ export class DroogGameClient {
   ): Promise<string> {
     const [matchPDA] = DroogGameClient.deriveMatchPDA(matchId)
 
-    const tx = await this.program.methods
+    const tx = await (this.program.methods as any)
       .initMatch(new BN(matchId), new BN(startTs))
       .accounts({
         matchState: matchPDA,
@@ -88,7 +92,7 @@ export class DroogGameClient {
     const [matchPDA] = DroogGameClient.deriveMatchPDA(matchId)
     const player = this.provider.wallet.publicKey
 
-    const tx = await this.program.methods
+    const tx = await (this.program.methods as any)
       .harvest(
         strainId,
         new BN(plantedAt),
@@ -114,7 +118,7 @@ export class DroogGameClient {
     const [matchPDA] = DroogGameClient.deriveMatchPDA(matchId)
     const player = this.provider.wallet.publicKey
 
-    const tx = await this.program.methods
+    const tx = await (this.program.methods as any)
       .sellToCustomer(customerIndex, strainLevel)
       .accounts({
         matchState: matchPDA,
@@ -133,7 +137,7 @@ export class DroogGameClient {
     const [matchPDA] = DroogGameClient.deriveMatchPDA(matchId)
     const player = this.provider.wallet.publicKey
 
-    const tx = await this.program.methods
+    const tx = await (this.program.methods as any)
       .finalizeMatch()
       .accounts({
         matchState: matchPDA,
@@ -150,7 +154,7 @@ export class DroogGameClient {
   async getMatchState(matchId: number): Promise<MatchState | null> {
     try {
       const [matchPDA] = DroogGameClient.deriveMatchPDA(matchId)
-      const account = await this.program.account.matchState.fetch(matchPDA)
+      const account = await (this.program.account as any).matchState.fetch(matchPDA)
       
         return {
           matchId: account.matchId,
@@ -261,13 +265,13 @@ export class DroogGameClient {
 export function createWalletFromKeypair(keypair: any): Wallet {
   return {
     publicKey: keypair.publicKey,
-    signTransaction: async (tx: Transaction) => {
-      tx.sign(keypair)
+    signTransaction: async <T extends Transaction>(tx: T): Promise<T> => {
+      (tx as Transaction).sign(keypair)
       return tx
     },
-    signAllTransactions: async (txs: Transaction[]) => {
-      txs.forEach(tx => tx.sign(keypair))
+    signAllTransactions: async <T extends Transaction>(txs: T[]): Promise<T[]> => {
+      txs.forEach(tx => (tx as Transaction).sign(keypair))
       return txs
     },
-  }
+  } as Wallet
 }
