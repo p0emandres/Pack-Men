@@ -14,8 +14,8 @@ COPY . .
 # Build TypeScript
 RUN npm run build
 
-# Expose port
-EXPOSE 3001
+# Expose port (Railway sets PORT env var, typically 8080)
+EXPOSE 8080
 
 # Start the server
 CMD ["npm", "start"]

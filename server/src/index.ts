@@ -20,39 +20,20 @@ async function buildServer() {
   })
 
   // CORS configuration
-  // Parse allowed origins from environment variable, or use defaults
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || ['http://localhost:3000']
+  // Build list of allowed origins from env var + defaults
+  const envOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || []
+  const allowedOrigins = [
+    ...envOrigins,
+    'http://localhost:3000',
+    'http://localhost:5173',
+    // Allow all Vercel preview URLs
+    /\.vercel\.app$/,
+    // Allow localhost on any port
+    /^http:\/\/localhost(:\d+)?$/,
+  ]
   
   await fastify.register(cors, {
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or Postman)
-      if (!origin) {
-        callback(null, true)
-        return
-      }
-      
-      // Check if origin matches allowed list
-      if (allowedOrigins.some(allowed => {
-        // Support wildcard patterns like https://*.vercel.app
-        if (allowed.includes('*')) {
-          const pattern = new RegExp('^' + allowed.replace(/\*/g, '.*') + '$')
-          return pattern.test(origin)
-        }
-        return allowed === origin
-      })) {
-        callback(null, true)
-        return
-      }
-      
-      // Also allow Vercel preview URLs (*.vercel.app) and localhost
-      if (origin.endsWith('.vercel.app') || origin.includes('localhost')) {
-        callback(null, true)
-        return
-      }
-      
-      console.warn(`CORS blocked origin: ${origin}`)
-      callback(new Error('Not allowed by CORS'), false)
-    },
+    origin: allowedOrigins,
     credentials: true,
   })
 

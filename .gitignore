@@ -26,3 +26,4 @@ certs/
 *.pem
 *.key
 .vercel
+.env*.local
