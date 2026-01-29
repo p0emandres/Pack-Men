@@ -1,0 +1,9 @@
+# Ignore frontend - only deploy server to Railway
+src/
+public/
+dist/
+index.html
+vite.config.ts
+tsconfig.json
+*.md
+programs/
