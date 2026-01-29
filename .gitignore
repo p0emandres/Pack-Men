@@ -1,0 +1,27 @@
+node_modules
+dist
+.DS_Store
+*.log
+
+# Environment variables (CRITICAL: Never commit secrets)
+.env
+.env.local
+.env.*.local
+server/.env
+server/.env.local
+server/.env.*.local
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+Thumbs.db
+
+# SSL certificates for local development
+certs/
+*.pem
+*.key
