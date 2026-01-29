@@ -1,6 +1,8 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import { getJWTService } from '../services/jwt.js'
 
+const isProduction = process.env.NODE_ENV === 'production'
+
 /**
  * Middleware to verify Privy session JWT.
  * 
@@ -22,7 +24,7 @@ export async function verifyPrivyJWT(
   const privyAppId = process.env.PRIVY_APP_ID
   const privyAppSecret = process.env.PRIVY_APP_SECRET
   if (!privyAppId || !privyAppSecret) {
-    reply.code(500).send({ error: 'Server configuration error: PRIVY_APP_ID and PRIVY_APP_SECRET are required' })
+    reply.code(500).send({ error: 'Server configuration error' })
     return
   }
 
@@ -34,40 +36,18 @@ export async function verifyPrivyJWT(
     ;(request as any).privyUserId = decoded.userId
     ;(request as any).tokenExp = decoded.exp
   } catch (error) {
-    // Always log detailed error information for debugging
-    // (In production, you may want to limit this to avoid logging sensitive data)
-    console.error('JWT verification error:', error)
-    console.error('Token (first 50 chars):', token.substring(0, 50))
-    console.error('Token length:', token.length)
-    console.error('PRIVY_APP_ID:', process.env.PRIVY_APP_ID)
-    console.error('NODE_ENV:', process.env.NODE_ENV || 'not set')
-    
-    // Try to decode token to see what's in it
-    try {
-      const parts = token.split('.')
-      if (parts.length === 3) {
-        const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf-8'))
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'))
-        console.error('Token header:', JSON.stringify(header, null, 2))
-        console.error('Token payload:', JSON.stringify({
-          sub: payload.sub,
-          iss: payload.iss,
-          aud: payload.aud,
-          exp: payload.exp,
-          iat: payload.iat,
-          expDate: payload.exp ? new Date(payload.exp * 1000).toISOString() : null,
-          now: new Date().toISOString(),
-        }, null, 2))
-      } else {
-        console.error('Token does not have 3 parts (not a valid JWT structure)')
-      }
-    } catch (decodeErr) {
-      console.error('Could not decode token:', decodeErr)
+    // Security: Only log minimal info in production to avoid leaking sensitive data
+    if (isProduction) {
+      console.error('JWT verification failed')
+    } else {
+      // Development: log more details for debugging
+      console.error('JWT verification error:', error instanceof Error ? error.message : 'Unknown error')
     }
     
     reply.code(401).send({
       error: 'Invalid or expired token',
-      details: error instanceof Error ? error.message : 'Unknown error',
+      // Security: Don't expose error details in production
+      ...(isProduction ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
     })
     return
   }

@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@fastify/cors": "^8.4.0",
+    "@fastify/helmet": "^13.0.2",
     "@fastify/jwt": "^10.0.0",
+    "@fastify/rate-limit": "^10.3.0",
     "@fastify/websocket": "^8.3.1",
     "@privy-io/node": "^0.8.0",
     "@supabase/supabase-js": "^2.91.1",

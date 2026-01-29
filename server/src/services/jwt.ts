@@ -1,6 +1,8 @@
 import { verifyAccessToken } from '@privy-io/node'
 import { createRemoteJWKSet } from 'jose'
 
+const isProduction = process.env.NODE_ENV === 'production'
+
 /**
  * Privy JWT verification service.
  * 
@@ -17,14 +19,13 @@ class PrivyJWTService {
     this.privyAppId = privyAppId
     
     // Create JWKS endpoint using jose library
-    // This constructs the correct URL: https://auth.privy.io/v1/apps/{appId}/jwks.json
     const jwksUrl = new URL(`/v1/apps/${privyAppId}/jwks.json`, 'https://auth.privy.io')
     this.jwks = createRemoteJWKSet(jwksUrl)
     
-    // Always log initialization for debugging
-    console.log('Initialized Privy JWT service with Privy SDK')
-    console.log('Privy App ID:', privyAppId)
-    console.log('JWKS URL:', jwksUrl.toString())
+    // Only log in development
+    if (!isProduction) {
+      console.log('Initialized Privy JWT service')
+    }
   }
 
   /**
@@ -37,23 +38,16 @@ class PrivyJWTService {
   async verifyToken(token: string): Promise<{ userId: string; exp: number; iat: number }> {
     try {
       // Use Privy SDK's verifyAccessToken function
-      // It takes a JWKS function as the verification_key
       const result = await verifyAccessToken({
         access_token: token,
         app_id: this.privyAppId,
         verification_key: this.jwks as any,
       })
       
-      // Extract user ID from the verified result
-      // The user_id is the 'sub' claim from the token
       const userId = result.user_id
       if (!userId) {
         throw new Error('Token missing user ID')
       }
-
-      console.log('Token verified successfully using Privy SDK')
-      console.log('User ID:', userId)
-      console.log('Expiration:', new Date(result.expiration * 1000).toISOString())
 
       return {
         userId,
@@ -61,28 +55,9 @@ class PrivyJWTService {
         iat: result.issued_at,
       }
     } catch (error) {
-      // Log detailed error information
-      console.error('Privy SDK token verification failed:', error)
-      
-      // Try to decode token to see what's in it
-      try {
-        const parts = token.split('.')
-        if (parts.length === 3) {
-          const payloadPart = parts[1]
-          const decoded = Buffer.from(payloadPart, 'base64url').toString('utf-8')
-          const decodedPayload = JSON.parse(decoded)
-          console.error('Token payload:', JSON.stringify({
-            sub: decodedPayload.sub,
-            iss: decodedPayload.iss,
-            aud: decodedPayload.aud,
-            exp: decodedPayload.exp,
-            iat: decodedPayload.iat,
-            expDate: decodedPayload.exp ? new Date(decodedPayload.exp * 1000).toISOString() : null,
-            now: new Date().toISOString(),
-          }, null, 2))
-        }
-      } catch (decodeError) {
-        console.error('Could not decode token for inspection:', decodeError)
+      // Security: Only log minimal info in production
+      if (!isProduction) {
+        console.error('Token verification failed:', error instanceof Error ? error.message : 'Unknown error')
       }
       
       if (error instanceof Error) {
