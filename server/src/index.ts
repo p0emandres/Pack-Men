@@ -103,8 +103,8 @@ async function start() {
     const server = await buildServer()
     const port = parseInt(process.env.PORT || '3001', 10)
 
-    // Use 0.0.0.0 in production to accept external connections
-    const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost'
+    // Always use 0.0.0.0 to accept external connections (required for Railway/Docker)
+    const host = '0.0.0.0'
     await server.listen({ port, host })
     console.log(`Server listening on port ${port}`)
   } catch (error) {
