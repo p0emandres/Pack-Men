@@ -79,7 +79,7 @@ async function buildServer() {
 
   // Global error handler
   // Security: Error handling prevents information leakage
-  fastify.setErrorHandler((error, request, reply) => {
+  fastify.setErrorHandler((error: Error & { validation?: unknown; statusCode?: number }, request, reply) => {
     // Log full error internally
     fastify.log.error(error)
 

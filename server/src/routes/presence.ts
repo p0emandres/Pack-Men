@@ -1,7 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import websocket from '@fastify/websocket'
-import type { SocketStream } from '@fastify/websocket'
-import * as WebSocket from 'ws'
+import websocket, { type WebSocket } from '@fastify/websocket'
 import { verifyPrivyJWT } from '../middleware/auth.js'
 import { sessionStore } from '../services/sessionStore.js'
 
@@ -340,12 +338,12 @@ export async function presenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/:matchId',
     { websocket: true },
-    async (connection: SocketStream, request: FastifyRequest<{ Params: { matchId: string }; Querystring: { token?: string } }>) => {
+    async (socket: WebSocket, request: FastifyRequest<{ Params: { matchId: string }; Querystring: { token?: string } }>) => {
       const matchId = request.params.matchId
       const token = request.query.token
 
       if (!token) {
-        connection.socket.close(1008, 'Missing authentication token')
+        socket.close(1008, 'Missing authentication token')
         return
       }
 
@@ -355,7 +353,7 @@ export async function presenceRoutes(fastify: FastifyInstance) {
         const privyAppId = process.env.PRIVY_APP_ID
         const privyAppSecret = process.env.PRIVY_APP_SECRET
         if (!privyAppId || !privyAppSecret) {
-          connection.socket.close(1011, 'Server configuration error')
+          socket.close(1011, 'Server configuration error')
           return
         }
 
@@ -364,19 +362,19 @@ export async function presenceRoutes(fastify: FastifyInstance) {
         const decoded = await jwtService.verifyToken(token)
         privyUserId = decoded.userId
       } catch (error) {
-        connection.socket.close(1008, 'Invalid or expired token')
+        socket.close(1008, 'Invalid or expired token')
         return
       }
 
       // Verify user is in this match
       const match = sessionStore.getMatch(matchId)
       if (!match) {
-        connection.socket.close(1008, 'Match not found')
+        socket.close(1008, 'Match not found')
         return
       }
 
       if (!match.participants.includes(privyUserId)) {
-        connection.socket.close(1008, 'Not a participant in this match')
+        socket.close(1008, 'Not a participant in this match')
         return
       }
 
@@ -396,7 +394,7 @@ export async function presenceRoutes(fastify: FastifyInstance) {
 
       // Store connection with lastActivity for ghost cleanup
       activeConnections.set(privyUserId, {
-        socket: connection.socket,
+        socket,
         matchId,
         lastActivity: now,
       })
@@ -414,7 +412,7 @@ export async function presenceRoutes(fastify: FastifyInstance) {
           initialPresences.push(presence)
         }
       }
-      connection.socket.send(JSON.stringify({
+      socket.send(JSON.stringify({
         type: 'presence_snapshot',
         presences: initialPresences,
         serverTs: now,
@@ -424,19 +422,22 @@ export async function presenceRoutes(fastify: FastifyInstance) {
       console.log(`[Presence] Message handler registered for ${privyUserId}`)
       
       // Handle incoming messages
-      connection.socket.on('message', (message: Buffer | ArrayBuffer | Buffer[]) => {
+      socket.addEventListener('message', (event) => {
+        const message = event.data
         // Debug: Log raw message received
-        console.log(`[Presence] RAW MESSAGE from ${privyUserId.slice(-8)}: type=${typeof message}, length=${message instanceof Buffer ? message.length : 'unknown'}`)
+        console.log(`[Presence] RAW MESSAGE from ${privyUserId.slice(-8)}: type=${typeof message}`)
         
         try {
           // Handle different message formats
           let messageStr: string
-          if (message instanceof Buffer) {
-            messageStr = message.toString('utf8')
+          if (typeof message === 'string') {
+            messageStr = message
           } else if (message instanceof ArrayBuffer) {
             messageStr = Buffer.from(message).toString('utf8')
-          } else if (Array.isArray(message)) {
-            messageStr = Buffer.concat(message).toString('utf8')
+          } else if (message instanceof Blob) {
+            // Blob handling would be async, but typically we receive strings or ArrayBuffers
+            console.error('[Presence] Received Blob, which is not expected')
+            return
           } else {
             messageStr = String(message)
           }
@@ -511,7 +512,7 @@ export async function presenceRoutes(fastify: FastifyInstance) {
       })
 
       // Handle disconnect
-      connection.socket.on('close', () => {
+      socket.addEventListener('close', () => {
         console.log(`[Presence] ${privyUserId} disconnected from match ${matchId}`)
         
         // Remove from presence store
@@ -533,8 +534,8 @@ export async function presenceRoutes(fastify: FastifyInstance) {
       })
 
       // Handle errors
-      connection.socket.on('error', (error: Error) => {
-        console.error(`[Presence] WebSocket error for ${privyUserId}:`, error)
+      socket.addEventListener('error', (event) => {
+        console.error(`[Presence] WebSocket error for ${privyUserId}:`, event)
       })
     }
   )
