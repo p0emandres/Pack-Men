@@ -67,8 +67,15 @@ async function buildServer() {
     })
   })
 
+  // Root endpoint
+  fastify.get('/', async () => {
+    console.log('[Server] Root endpoint hit')
+    return { service: 'droog-server', status: 'running', timestamp: Date.now() }
+  })
+
   // Health check
   fastify.get('/health', async () => {
+    console.log('[Server] Health check hit')
     return { status: 'ok', timestamp: Date.now() }
   })
 

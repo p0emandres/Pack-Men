@@ -1,5 +1,6 @@
 FROM node:22-alpine
 
+# Force rebuild: 2026-01-29
 WORKDIR /app
 
 # Copy package files
