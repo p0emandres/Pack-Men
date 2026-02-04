@@ -43,4 +43,44 @@ pub enum DroogError {
     
     #[msg("Only match participants can finalize the match")]
     UnauthorizedFinalization,
+    
+    // ========== New Grow/Harvest System Errors ==========
+    
+    #[msg("Match ID mismatch between accounts")]
+    MatchIdMismatch,
+    
+    #[msg("Planting is locked during the final 5 minutes of the match")]
+    EndgamePlantingLocked,
+    
+    #[msg("Invalid grow slot index (must be 0-5)")]
+    InvalidSlotIndex,
+    
+    #[msg("Grow slot is already occupied (plant_state is not Empty)")]
+    SlotOccupied,
+    
+    #[msg("Grow slot is empty")]
+    SlotEmpty,
+    
+    #[msg("Plant will not be ready before match ends")]
+    PlantWontBeReady,
+    
+    #[msg("Insufficient inventory to complete this sale")]
+    InsufficientInventory,
+    
+    #[msg("Inventory is at capacity (6 items max)")]
+    InventoryFull,
+    
+    // ========== Delivery State Errors ==========
+    
+    #[msg("Customer is not available for delivery in the current rotation")]
+    CustomerNotAvailableForDelivery,
+    
+    #[msg("Delivery slots have not rotated yet (60s minimum between refreshes)")]
+    DeliveryRotationTooSoon,
+    
+    #[msg("Delivery state has not been initialized for this match")]
+    DeliveryStateNotInitialized,
+    
+    #[msg("Player A must have a lower pubkey than Player B for deterministic PDA derivation")]
+    InvalidPlayerOrder,
 }

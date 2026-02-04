@@ -6,9 +6,59 @@ Create a `.env` file in the project root with:
 
 ```
 VITE_PRIVY_APP_ID=your_privy_app_id_here
+VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
 ```
 
 Get your Privy App ID from https://dashboard.privy.io
+
+### Solana RPC Configuration
+
+**Important:** The public Solana RPC endpoints (`https://api.devnet.solana.com` or `https://api.mainnet-beta.solana.com`) are rate-limited and may block your IP if you make too many requests. For production use, you should configure a private RPC endpoint.
+
+#### Option 1: Use a Free Private RPC Provider
+
+1. **Helius** (Recommended - Free tier available):
+   - Sign up at https://dashboard.helius.dev
+   - Create an API key
+   - For devnet: `https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY`
+   - For mainnet: `https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY`
+   - **Important**: The API key must be in the query string as `?api-key=YOUR_KEY` (not `apiKey` or in headers)
+   - **Troubleshooting**: If you get 403 errors with Helius:
+     - Verify your API key is correct and active in the Helius dashboard
+     - Check that your account hasn't exceeded rate limits
+     - Ensure the URL format is exactly: `https://devnet.helius-rpc.com/?api-key=YOUR_KEY`
+     - Check the browser Network tab to see if the API key is being sent in requests
+
+2. **QuickNode**:
+   - Sign up at https://www.quicknode.com
+   - Create a free endpoint
+   - Use the provided RPC URL
+
+3. **Alchemy**:
+   - Sign up at https://www.alchemy.com
+   - Create a Solana app
+   - Use the provided RPC URL
+
+#### Option 2: Use Public Endpoints (Development Only)
+
+For development, you can use the public endpoints, but be aware they may return 403 errors if rate-limited:
+
+```
+# Devnet (default)
+VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
+
+# Mainnet (if needed)
+VITE_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+```
+
+#### Troubleshooting 403 Errors
+
+If you see `SolanaError: HTTP error (403)`, it means:
+- Your IP has been blocked by the public RPC endpoint
+- You're using a private RPC endpoint without a valid API key
+- You've exceeded rate limits
+
+**Solution:** Configure a private RPC endpoint with a valid API key in your `.env` file.
 
 ## Backend (server/.env)
 

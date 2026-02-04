@@ -15,6 +15,55 @@ interface PrivyProviderProps {
  */
 export function PrivyProvider({ children }: PrivyProviderProps) {
   const appId = import.meta.env.VITE_PRIVY_APP_ID
+  let rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com'
+  
+  // For Helius RPC URLs with query parameters, ensure the URL is properly formatted
+  // @solana/kit's createSolanaRpc should handle query parameters, but there's a known issue
+  // where query parameters may not be preserved in all contexts (e.g., iframe/web worker)
+  // If you're experiencing 403 errors, try:
+  // 1. Verify your Helius API key is valid and active in the dashboard
+  // 2. Check if you've exceeded rate limits
+  // 3. Consider using Helius's secure endpoint format (if available)
+  // 4. Temporarily use the public devnet endpoint to confirm the issue is Helius-specific
+  if (rpcUrl.includes('helius-rpc.com') && rpcUrl.includes('api-key=')) {
+    // Ensure the URL is properly formatted with the API key
+    // Helius requires the API key in the query string as ?api-key=KEY
+    try {
+      const urlObj = new URL(rpcUrl)
+      if (!urlObj.searchParams.has('api-key')) {
+        // If the API key is in the URL but not as a search param, reconstruct it
+        const apiKeyMatch = rpcUrl.match(/[?&]api-key=([^&]+)/)
+        if (apiKeyMatch) {
+          const apiKey = apiKeyMatch[1]
+          rpcUrl = `https://${urlObj.host}${urlObj.pathname}?api-key=${apiKey}`
+          console.warn('[PrivyProvider] Reconstructed Helius RPC URL with API key:', rpcUrl.replace(/api-key=[^&]+/, 'api-key=***'))
+        }
+      }
+    } catch (e) {
+      console.error('[PrivyProvider] Error parsing Helius RPC URL:', e)
+    }
+  }
+  
+  // Extract WebSocket URL from HTTP URL (replace https:// with wss://)
+  // For private RPC providers, WebSocket might not be available, so fallback to public WebSocket
+  let wsUrl: string
+  if (rpcUrl.includes('helius-rpc.com') || rpcUrl.includes('quicknode') || rpcUrl.includes('alchemy')) {
+    // Private RPC providers may not support WebSocket subscriptions
+    // Use public WebSocket endpoint as fallback
+    wsUrl = 'wss://api.devnet.solana.com'
+    console.log('[PrivyProvider] Using private RPC for HTTP, public WebSocket for subscriptions:', {
+      rpcUrl,
+      wsUrl,
+    })
+  } else {
+    wsUrl = rpcUrl.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://')
+  }
+  
+  console.log('[PrivyProvider] RPC Configuration:', {
+    rpcUrl,
+    wsUrl,
+    hasAppId: !!appId,
+  })
 
   if (!appId) {
     // Show a helpful error message instead of throwing
@@ -100,6 +149,7 @@ export function PrivyProvider({ children }: PrivyProviderProps) {
         },
         // Configure Solana RPC endpoints for embedded wallet functionality
         // Required for embedded wallet UIs (signTransaction and signAndSendTransaction)
+        // Uses VITE_SOLANA_RPC_URL from environment for devnet, falls back to public endpoints
         solana: {
           rpcs: {
             'solana:mainnet': {
@@ -107,8 +157,16 @@ export function PrivyProvider({ children }: PrivyProviderProps) {
               rpcSubscriptions: createSolanaRpcSubscriptions('wss://api.mainnet-beta.solana.com'),
             },
             'solana:devnet': {
-              rpc: createSolanaRpc('https://api.devnet.solana.com'),
-              rpcSubscriptions: createSolanaRpcSubscriptions('wss://api.devnet.solana.com'),
+              // Use configured RPC URL (supports private RPC endpoints like Helius)
+              // NOTE: If you're getting 403 errors with Helius, it may be because:
+              // 1. The API key is invalid/expired - verify in Helius dashboard
+              // 2. Rate limits exceeded - check your Helius account limits
+              // 3. @solana/kit may not preserve query parameters in all contexts
+              //    If this is the case, consider using Helius's secure endpoint format
+              //    or temporarily use the public devnet endpoint for testing
+              // Type assertion needed because createSolanaRpc returns a union type
+              rpc: createSolanaRpc(rpcUrl) as any,
+              rpcSubscriptions: createSolanaRpcSubscriptions(wsUrl) as any,
             },
           },
         },

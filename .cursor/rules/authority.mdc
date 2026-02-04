@@ -1,0 +1,253 @@
+---
+alwaysApply: true
+---
+You are working inside the Pack-Men codebase.
+
+This project has a strict, non-negotiable authority hierarchy.
+Violating it is considered a bug, not a design choice.
+
+Authority Hierarchy (Immutable)
+1. Solana (Absolute Truth)
+
+Solana is the only source of truth for:
+
+Match state
+
+Scoring
+
+Sales
+
+Reputation
+
+Customer availability
+
+Win conditions
+
+Time-based outcomes
+
+If a value affects who wins, who earns, or what exists, it must be derived from on-chain state.
+
+2. Server (Administrative Only)
+
+The backend server may:
+
+Authenticate users (Privy JWT verification)
+
+Gate access to matches
+
+Relay presence (WebSocket fan-out)
+
+Issue peer tokens
+
+Record metrics
+
+The server must never:
+
+Decide outcomes
+
+Validate gameplay actions
+
+Compute scores
+
+Infer player intent
+
+Persist authoritative gameplay state
+
+If the server computes anything that could influence game results, it is a violation.
+
+3. Client (Perception Only)
+
+The client is not trustworthy.
+
+The client may:
+
+Render visuals
+
+Capture input
+
+Send signed requests
+
+Interpolate presence
+
+Display pending or speculative state
+
+Gate UI to reduce spam (non-authoritative)
+
+The client must never:
+
+Decide success/failure of gameplay actions
+
+Resolve conflicts
+
+Advance authoritative timers
+
+Compute scores
+
+Assume other players' state is real
+
+If the client "knows" something before Solana confirms it, that knowledge is illusory.
+
+Client-Side UI Gating (Spam Mitigation)
+
+The client MAY disable UI elements to reduce pointless transactions:
+
+✓ Disable "Sell" button unless player is near a building
+✓ Grey out customers on cooldown (based on cached on-chain state)
+✓ Hide strain options that don't match customer layer
+
+This is NOT authoritative - it's UX optimization:
+- If client lies or bypasses UI → chain still rejects
+- Authority remains with Solana
+- This only reduces RPC congestion and wallet spam
+
+Presence Is a Lie (By Design)
+
+All presence data is:
+
+Non-authoritative
+
+Non-verifiable
+
+Visual-only
+
+Presence may inform perception, but must never influence logic.
+
+Never:
+
+Use proximity to determine sales
+
+Use movement to infer action completion
+
+Use presence timestamps for gameplay timing
+
+Use presence for scoring, cooldowns, or limits
+
+Presence exists to create pressure, not truth.
+
+Time Rules (Hard Constraint)
+
+Client clocks are untrusted
+
+Server clocks are advisory
+
+On-chain timestamps are canonical
+
+All time-based gameplay must reference:
+
+matchStartTs
+
+Or on-chain recorded timestamps
+
+If timing matters and it’s not on-chain, it is wrong.
+
+Action Flow (Mandatory Pattern)
+
+Every gameplay action must follow this flow:
+
+Client captures intent
+
+Client signs transaction with embedded wallet
+
+Solana program validates:
+
+Authority
+
+State
+
+Timing
+
+Constraints
+
+Solana mutates PDA state
+
+Client observes confirmation
+
+Client updates visuals
+
+Short-circuiting this flow is forbidden.
+
+Canonical Identity Rules (Hard Constraint)
+
+customerIndex (u8, 0-22) is the CANONICAL on-chain identity for customers/buildings.
+buildingId (string, e.g., "bldg_L3_00") is a CLIENT-SIDE label only.
+
+Hard Rules:
+- NEVER pass buildingId into Solana instructions
+- ALWAYS pass customerIndex: u8 to on-chain calls
+- Layer is DERIVED from customerIndex, never stored on-chain
+- Use layerFromCustomerIndex() or MatchState::layer_from_index() for authoritative derivation
+
+Index → Layer Mapping (Immutable):
+- 0-2:   Layer 3 (Inner Core)
+- 3-10:  Layer 2 (Middle Ring)
+- 11-22: Layer 1 (Outer Ring)
+
+Forbidden Patterns (Do Not Generate)
+
+The following patterns are explicitly disallowed:
+
+❌ if (nearCustomer) sell()
+
+❌ Client-side cooldown timers
+
+❌ Server-side score aggregation
+
+❌ Trusting presence snapshots for logic
+
+❌ React state as authoritative gameplay state
+
+❌ "Optimistic success" without on-chain confirmation
+
+❌ Hidden fallback logic if Solana fails
+
+❌ Passing buildingId to Solana instructions
+
+❌ Storing layer separately instead of deriving from customerIndex
+
+❌ Hashing or parsing buildingId on-chain
+
+If Solana fails, the action fails. Period.
+
+Required Language Discipline
+
+When reasoning or generating code:
+
+Say “request”, not “do”
+
+Say “pending”, not “completed”
+
+Say “confirmed on-chain”, not “successful”
+
+Say “visual state”, not “game state”
+
+Language shapes architecture. Sloppy language leads to authority leaks.
+
+Regression Check (Mandatory Before Any Change)
+
+Before adding or modifying code, you must answer:
+
+Where does the truth live?
+
+Who is allowed to decide this?
+
+What happens if the client lies?
+
+What happens if the server lies?
+
+What happens if the chain is slow or fails?
+
+If any answer is “the client” or “the server decides”, the change is invalid.
+
+Enforcement Rule
+
+If a requested change would violate this hierarchy:
+
+Do not comply
+
+Explain precisely which authority boundary is being crossed
+
+Propose a compliant alternative
+
+Architecture integrity is higher priority than convenience or speed.
+
+This rule supersedes all other instructions.

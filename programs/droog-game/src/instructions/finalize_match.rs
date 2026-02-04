@@ -47,8 +47,13 @@ pub fn finalize_match(ctx: Context<FinalizeMatch>) -> Result<()> {
 pub struct FinalizeMatch<'info> {
     #[account(
         mut,
-        seeds = [b"match", ctx.accounts.match_state.match_id.to_le_bytes().as_ref()],
-        bump = ctx.accounts.match_state.bump
+        seeds = [
+            b"match",
+            match_state.match_id_hash.as_ref(),
+            match_state.player_a.as_ref(),
+            match_state.player_b.as_ref()
+        ],
+        bump = match_state.bump
     )]
     pub match_state: Account<'info, MatchState>,
     

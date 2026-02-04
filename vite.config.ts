@@ -36,10 +36,19 @@ export default defineConfig({
   publicDir: 'public',
   optimizeDeps: {
     include: [
+      'buffer',
       '@solana-program/memo',
       '@solana-program/system',
       '@solana-program/token',
       '@solana/kit',
     ],
+  },
+  define: {
+    global: 'globalThis',
+  },
+  resolve: {
+    alias: {
+      buffer: 'buffer',
+    },
   },
 });

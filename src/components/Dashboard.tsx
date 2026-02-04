@@ -984,12 +984,22 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
         return
       }
 
+      // Get wallet address to send to server
+      const walletAddress = getWalletAddress()
+      if (!walletAddress) {
+        setIsLoading(false)
+        alert('Wallet address not available. Please ensure your wallet is connected.')
+        return
+      }
+
       const apiBaseUrl = import.meta.env.VITE_API_URL || ''
       const response = await fetch(`${apiBaseUrl}/api/match/${matchCode}/ready`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ walletAddress }),
       })
 
       if (!response.ok) {

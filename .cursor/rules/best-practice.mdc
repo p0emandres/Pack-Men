@@ -1,0 +1,26 @@
+---
+alwaysApply: true
+---
+Always derive and validate PDAs using the same program id and seeds. PDAs are derived deterministically from a program ID plus optional seeds, and Anchor uses seeds/bump constraints as security checks.
+
+1 basics/pda
+
+2 core/pda
+
+Always use seeds and bump together in Anchor PDA constraints (they’re required to be used together).
+
+1 basics/pda
+
+When deriving PDAs, use the canonical bump and include security checks so a PDA passed into an instruction is derived from the canonical bump.
+
+2 core/pda
+
+Remember that deriving a PDA does not create an on-chain account; the account must be explicitly created by the program.
+
+2 core/pda
+
+If you use PDA seeds in Anchor constraints, rely on the fact that those seeds are included in the program’s IDL so the Anchor client can resolve account addresses when constructing instructions.
+
+1 basics/pda
+
+If you hit DeclaredProgramIdMismatch, verify your declared program id matches the program id you actually deploy/use; a known fix is to ensure the Anchor.toml program id matches the pubkey declared in the program code. (This is community guidance.)

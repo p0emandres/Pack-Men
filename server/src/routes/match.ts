@@ -48,6 +48,8 @@ export async function matchRoutes(fastify: FastifyInstance) {
         readyPlayers: match.readyPlayers,
         allReady: match.participants.length === match.readyPlayers.length && 
                   match.participants.every(p => match.readyPlayers.includes(p)),
+        playerAWallet: match.playerAWallet,
+        playerBWallet: match.playerBWallet,
       }
     }
   )
@@ -249,7 +251,10 @@ export async function matchRoutes(fastify: FastifyInstance) {
    * Set player ready status.
    * POST /api/match/:matchId/ready
    */
-  fastify.post<{ Params: { matchId: string } }>(
+  fastify.post<{ 
+    Params: { matchId: string }
+    Body: { walletAddress?: string }
+  }>(
     '/:matchId/ready',
     {
       preHandler: verifyPrivyJWT,
@@ -261,14 +266,21 @@ export async function matchRoutes(fastify: FastifyInstance) {
           },
           required: ['matchId'],
         },
+        body: {
+          type: 'object',
+          properties: {
+            walletAddress: { type: 'string' },
+          },
+        },
       },
     },
     async (request, reply) => {
       try {
         const { matchId } = request.params
+        const { walletAddress } = request.body || {}
         const privyUserId = (request as any).privyUserId
 
-        console.log(`[Ready Endpoint] Request received: matchId=${matchId}, privyUserId=${privyUserId}`)
+        console.log(`[Ready Endpoint] Request received: matchId=${matchId}, privyUserId=${privyUserId}, walletAddress=${walletAddress}`)
 
         if (!matchId) {
           console.error('[Ready Endpoint] Missing matchId parameter')
@@ -304,6 +316,17 @@ export async function matchRoutes(fastify: FastifyInstance) {
         // Initialize readyPlayers if it doesn't exist (for matches created before this field was added)
         if (!match.readyPlayers) {
           match.readyPlayers = []
+        }
+
+        // Initialize participantWallets if it doesn't exist
+        if (!match.participantWallets) {
+          match.participantWallets = new Map<string, string>()
+        }
+
+        // Store wallet address if provided
+        if (walletAddress) {
+          match.participantWallets.set(privyUserId, walletAddress)
+          console.log(`[Ready Endpoint] Stored wallet address for ${privyUserId}: ${walletAddress}`)
         }
 
         const isParticipant = match.participants.includes(privyUserId)
@@ -345,6 +368,28 @@ export async function matchRoutes(fastify: FastifyInstance) {
         // Ensure participants array exists
         if (!updatedMatch.participants) {
           updatedMatch.participants = []
+        }
+
+        // Derive playerAWallet and playerBWallet if both players are ready and we have wallet addresses
+        if (updatedMatch.participants.length === 2 && 
+            updatedMatch.readyPlayers.length === 2 &&
+            updatedMatch.participantWallets &&
+            updatedMatch.participantWallets.size === 2) {
+          const wallets: string[] = []
+          for (const participantId of updatedMatch.participants) {
+            const wallet = updatedMatch.participantWallets.get(participantId)
+            if (wallet) {
+              wallets.push(wallet)
+            }
+          }
+          
+          if (wallets.length === 2) {
+            // Sort wallets deterministically (lexicographic order)
+            wallets.sort()
+            updatedMatch.playerAWallet = wallets[0]
+            updatedMatch.playerBWallet = wallets[1]
+            console.log(`[Ready Endpoint] Derived player wallets: playerA=${wallets[0]}, playerB=${wallets[1]}`)
+          }
         }
 
         let allReady = false

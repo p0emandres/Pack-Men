@@ -6,6 +6,7 @@ import { BuildingTracker } from './buildingTracker.js';
 import type { PlayerIdentity } from './types/identity';
 import { identityStore } from './game/identityStore';
 import { CityScene } from './scenes/city/CityScene.js';
+import { growSlotIndicatorManagerA, growSlotIndicatorManagerB } from './game/growSlotIndicators';
 // WebRTC message format types available in ./types/webrtc.ts
 // All WebRTC messages MUST include peerToken and privyUserId for security
 
@@ -3593,11 +3594,28 @@ function addPotsToExistingRooms(): void {
                             potWorldCenter.z  // Center Z
                         );
                         
-                        // Enable shadows
+                        // Enable shadows and make plants brighter green
                         cannabis.traverse((child) => {
                             if (child instanceof THREE.Mesh) {
                                 child.castShadow = true;
                                 child.receiveShadow = true;
+                                
+                                // Make cannabis plants bright vibrant green, less affected by shadows
+                                if (child.material) {
+                                    const material = Array.isArray(child.material) ? child.material[0] : child.material;
+                                    // Create a darker natural green material with subtle emissive glow to reduce shadow impact
+                                    const brightGreen = new THREE.MeshStandardMaterial({
+                                        color: 0x5a9a5a, // Darker natural plant green
+                                        metalness: 0,
+                                        roughness: 0.4, // Slightly more roughness for natural look
+                                        map: (material as any).map || null,
+                                        normalMap: (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhongMaterial) ? ((material as any).normalMap || null) : null,
+                                        emissive: new THREE.Color(0x2a7a2a), // Darker green emissive glow
+                                        emissiveIntensity: 0.15, // Subtle glow to reduce shadow impact
+                                        flatShading: false
+                                    });
+                                    child.material = brightGreen;
+                                }
                             }
                         });
                         
@@ -3615,8 +3633,23 @@ function addPotsToExistingRooms(): void {
         // Add fans between pot sections
         addFansBetweenPotSections(roomId, roomGroup, sections);
         
-        // Add strain name labels to each section
-        addStrainLabels(roomId, roomGroup, sections);
+        // Initialize grow slot indicators for this room
+        initializeGrowSlotIndicators(roomId, roomGroup);
+    }
+}
+
+// Function to initialize grow slot indicators for a room
+async function initializeGrowSlotIndicators(roomId: number, roomGroup: THREE.Group): Promise<void> {
+    if (roomId === 1) {
+        // Room 1 uses manager A
+        if (!growSlotIndicatorManagerA.isInitialized) {
+            await growSlotIndicatorManagerA.initialize(roomGroup, roomId);
+        }
+    } else if (roomId === 2) {
+        // Room 2 uses manager B
+        if (!growSlotIndicatorManagerB.isInitialized) {
+            await growSlotIndicatorManagerB.initialize(roomGroup, roomId);
+        }
     }
 }
 
@@ -3782,11 +3815,28 @@ function addCannabisToExistingPots(): void {
                     potWorldCenter.z  // Center Z
                 );
                 
-                // Enable shadows
+                // Enable shadows and make plants brighter green
                 cannabis.traverse((cannabisChild) => {
                     if (cannabisChild instanceof THREE.Mesh) {
                         cannabisChild.castShadow = true;
                         cannabisChild.receiveShadow = true;
+                        
+                        // Make cannabis plants bright vibrant green, less affected by shadows
+                        if (cannabisChild.material) {
+                            const material = Array.isArray(cannabisChild.material) ? cannabisChild.material[0] : cannabisChild.material;
+                            // Create a darker natural green material with subtle emissive glow to reduce shadow impact
+                            const brightGreen = new THREE.MeshStandardMaterial({
+                                color: 0x5a9a5a, // Darker natural plant green
+                                metalness: 0,
+                                roughness: 0.4, // Slightly more roughness for natural look
+                                map: (material as any).map || null,
+                                normalMap: (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhongMaterial) ? ((material as any).normalMap || null) : null,
+                                emissive: new THREE.Color(0x2a7a2a), // Darker green emissive glow
+                                emissiveIntensity: 0.15, // Subtle glow to reduce shadow impact
+                                flatShading: false
+                            });
+                            cannabisChild.material = brightGreen;
+                        }
                     }
                 });
                 
@@ -4408,8 +4458,10 @@ function enterRoom(roomId: number): void {
         }
     }
     
-    // Update label visibility to match room visibility
-    updateLabelVisibility(roomId, true);
+    // Ensure grow slot indicators are initialized (in case pots were added before)
+    if (potModel) {
+        initializeGrowSlotIndicators(roomId, roomData.roomGroup);
+    }
     
     // Teleport player to room spawn point (exitPoint is where player spawns in room)
     if (farmer) {
@@ -4470,16 +4522,27 @@ function getPlayerState(): { position: { x: number; y: number; z: number }; rota
 // Function to enter city scene
 function enterCityScene(): void {
     const identity = identityStore.getIdentity();
-    if (!identity || !identity.matchId) {
-        console.log('[CityScene] No match ID, skipping city scene initialization');
+    if (!identity) {
+        console.log('[CityScene] No identity, skipping city scene initialization');
         currentSceneType = 'city';
         return;
     }
 
+    const isDemoMode = identity.privyUserId.startsWith('demo-user');
+
     // Initialize city scene if not already initialized
-    // This ensures presence updates are received even when player is in a room
+    // For demo mode: initialize without matchId (no presence updates, but delivery indicators will show)
+    // For multiplayer: initialize with matchId (presence updates + availability-based indicators)
     if (!cityScene) {
-        console.log('[CityScene] Initializing city scene for presence updates');
+        if (isDemoMode) {
+            console.log('[CityScene] Initializing city scene for demo mode');
+        } else if (identity.matchId) {
+            console.log('[CityScene] Initializing city scene for presence updates');
+        } else {
+            console.log('[CityScene] No match ID, skipping city scene initialization');
+            currentSceneType = 'city';
+            return;
+        }
         cityScene = new CityScene(scene, camera, renderer, mainMapGroup, identity);
         cityScene.initialize(getPlayerState);
     }
@@ -4518,9 +4581,6 @@ function exitRoom(): void {
         scene.remove(roomData.roomGroup);
     }
     roomData.roomGroup.visible = false;
-    
-    // Update label visibility to match room visibility
-    updateLabelVisibility(currentRoomId, false);
     
     // Ensure main map is in scene and visible
     if (!scene.children.includes(mainMapGroup)) {
@@ -4766,8 +4826,9 @@ function createDoorExitIndicator(roomId: number, doorLocalPosition?: THREE.Vecto
     // Calculate indicator position based on door position and exit direction
     // Use only the calculated offset (no hardcoded adjustments) to work for both door positions
     // Move indicator 1.5 units south (negative Z direction)
+    // Move indicator 0.7 units east (positive X direction)
     const indicatorPosition = new THREE.Vector3(
-        finalDoorPosition.x + offsetX,
+        finalDoorPosition.x + offsetX + 1.3, // Moved 1.3 units east
         0.3, // Raised slightly above ground
         finalDoorPosition.z + offsetZ - 1.5 // Moved 1.5 units south
     );
@@ -5056,6 +5117,37 @@ function checkRoomExit(): void {
         eKeyJustPressed = true;
         exitRoom();
         // Prevent E key from triggering export
+        keys['e'] = false;
+    } else if (!keys['e']) {
+        // Reset flag when E key is released
+        eKeyJustPressed = false;
+    }
+}
+
+// Function to check if player wants to interact with a grow slot (press E key when near indicator)
+function checkGrowSlotInteraction(): void {
+    if (!farmer || currentRoomId === null) return;
+    
+    // Get the appropriate indicator manager
+    const manager = currentRoomId === 1 ? growSlotIndicatorManagerA : growSlotIndicatorManagerB;
+    
+    if (!manager.isInitialized) {
+        return;
+    }
+    
+    // Check proximity to any indicator
+    const playerPosition = farmer.position.clone();
+    const slotIndex = manager.checkProximity(playerPosition);
+    
+    // Check if player is near an indicator and E key is pressed (only trigger once per key press)
+    if (slotIndex !== null && keys['e'] && !eKeyJustPressed) {
+        eKeyJustPressed = true;
+        // Dispatch event to open the planting modal
+        const event = new CustomEvent('growSlotPlantingModalOpen', {
+            detail: { slotIndex }
+        });
+        window.dispatchEvent(event);
+        // Prevent E key from triggering other actions
         keys['e'] = false;
     } else if (!keys['e']) {
         // Reset flag when E key is released
@@ -5361,22 +5453,46 @@ function animate(): void {
     // Animate door exit indicators
     animateDoorExitIndicators();
     
+    // Update grow slot indicators (only when in a room)
+    if (currentRoomId === 1 && growSlotIndicatorManagerA.isInitialized) {
+        growSlotIndicatorManagerA.update(delta);
+    } else if (currentRoomId === 2 && growSlotIndicatorManagerB.isInitialized) {
+        growSlotIndicatorManagerB.update(delta);
+    }
+    
     // Handle character movement
     if (farmer) {
+        // Camera-relative movement: use camera's forward/right vectors (yaw only, ignore pitch)
+        // This ensures W always moves toward the center of the screen, matching player's mental model
+        const cameraForward = new THREE.Vector3();
+        camera.getWorldDirection(cameraForward);
+        
+        // Zero out Y component to ignore pitch (looking up/down shouldn't affect movement)
+        cameraForward.y = 0;
+        cameraForward.normalize();
+        
+        // Calculate right vector (perpendicular to forward, pointing right)
+        const cameraRight = new THREE.Vector3();
+        cameraRight.crossVectors(cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
+        
+        // Build movement direction from camera-relative input
         const moveDirection = new THREE.Vector3();
         
-        // Calculate movement direction based on pressed keys
+        // W = forward (toward camera's look direction)
         if (keys['w']) {
-            moveDirection.z -= 1;
+            moveDirection.add(cameraForward);
         }
+        // S = backward (away from camera's look direction)
         if (keys['s']) {
-            moveDirection.z += 1;
+            moveDirection.sub(cameraForward);
         }
+        // A = left (negative right vector)
         if (keys['a']) {
-            moveDirection.x -= 1;
+            moveDirection.sub(cameraRight);
         }
+        // D = right (positive right vector)
         if (keys['d']) {
-            moveDirection.x += 1;
+            moveDirection.add(cameraRight);
         }
         
         // Normalize movement direction for consistent speed in all directions
@@ -5472,8 +5588,14 @@ function animate(): void {
             // Check if player is entering a building
             checkBuildingEntrance();
         } else {
-            // Check if player wants to exit room
+            // Check if player wants to exit room (check this first, has priority)
+            const wasExiting = eKeyJustPressed;
             checkRoomExit();
+            // Check if player wants to interact with grow slot (only if exit didn't trigger)
+            // Exit check sets eKeyJustPressed to true, so we only check if it's still false
+            if (!wasExiting) {
+                checkGrowSlotInteraction();
+            }
         }
         
         // Constrain camera within room boundaries (only when not in free camera mode)
@@ -5597,4 +5719,41 @@ export function initScene(identity: PlayerIdentity, container: HTMLElement): voi
     
     // Start animation loop
     animate();
+}
+
+// Grow slot planting modal state management
+// These functions are used by GrowSlotPlantingModalManager component
+
+/**
+ * Get the current state of the grow slot planting modal.
+ * Returns null if modal is not open, or an object with slotIndex if open.
+ */
+export function getGrowSlotPlantingModalState(): { slotIndex: number } | null {
+    // This function is kept for compatibility but the modal manager uses events
+    // The actual state is managed by the React component via events
+    return null;
+}
+
+/**
+ * Close the grow slot planting modal by dispatching a close event.
+ */
+export function closeGrowSlotPlantingModal(): void {
+    const event = new CustomEvent('growSlotPlantingModalClose');
+    window.dispatchEvent(event);
+}
+
+/**
+ * Get the current room ID.
+ * @returns Room ID (1 for growRoomA, 2 for growRoomB) or null if not in a room
+ */
+export function getCurrentRoomId(): number | null {
+    return currentRoomId;
+}
+
+/**
+ * Get the current scene type.
+ * @returns Scene type ('city', 'growRoomA', 'growRoomB') or null
+ */
+export function getCurrentSceneType(): 'city' | 'growRoomA' | 'growRoomB' | null {
+    return currentSceneType;
 }

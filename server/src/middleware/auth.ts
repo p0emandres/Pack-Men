@@ -37,18 +37,10 @@ export async function verifyPrivyJWT(
     ;(request as any).tokenExp = decoded.exp
   } catch (error) {
     // Security: Only log minimal info in production to avoid leaking sensitive data
-    if (isProduction) {
-      console.error('JWT verification failed')
-    } else {
-      // Development: log more details for debugging
-      console.error('JWT verification error:', error instanceof Error ? error.message : 'Unknown error')
+    if (!isProduction) {
+      console.error('JWT verification failed:', error instanceof Error ? error.message : 'Unknown error')
     }
-    
-    reply.code(401).send({
-      error: 'Invalid or expired token',
-      // Security: Don't expose error details in production
-      ...(isProduction ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
-    })
+    reply.code(401).send({ error: 'Invalid or expired token' })
     return
   }
 }

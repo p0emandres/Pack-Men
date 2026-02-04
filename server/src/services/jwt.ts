@@ -21,19 +21,14 @@ class PrivyJWTService {
     // Create JWKS endpoint using jose library
     const jwksUrl = new URL(`/v1/apps/${privyAppId}/jwks.json`, 'https://auth.privy.io')
     this.jwks = createRemoteJWKSet(jwksUrl)
-    
-    // Only log in development
-    if (!isProduction) {
-      console.log('Initialized Privy JWT service')
-    }
   }
 
   /**
-   * Verify a Privy session JWT.
+   * Verify a Privy access token.
    * 
-   * @param token - The JWT token from Privy
-   * @returns Decoded token payload with Privy user ID
-   * @throws Error if token is invalid, expired, or signature verification fails
+   * @param token - The Privy access token to verify
+   * @returns Decoded token with userId, exp, and iat
+   * @throws Error if token is invalid or expired
    */
   async verifyToken(token: string): Promise<{ userId: string; exp: number; iat: number }> {
     try {
@@ -57,13 +52,9 @@ class PrivyJWTService {
     } catch (error) {
       // Security: Only log minimal info in production
       if (!isProduction) {
-        console.error('Token verification failed:', error instanceof Error ? error.message : 'Unknown error')
+        console.error('JWT verification failed:', error instanceof Error ? error.message : 'Unknown error')
       }
-      
-      if (error instanceof Error) {
-        throw new Error(`JWT verification failed: ${error.message}`)
-      }
-      throw new Error('JWT verification failed: Unknown error')
+      throw error
     }
   }
 }
@@ -71,6 +62,13 @@ class PrivyJWTService {
 // Singleton instance
 let jwtServiceInstance: PrivyJWTService | null = null
 
+/**
+ * Get or create the JWT service singleton.
+ * 
+ * @param privyAppId - Privy application ID
+ * @param privyAppSecret - Privy application secret (unused but kept for API compatibility)
+ * @returns PrivyJWTService instance
+ */
 export function getJWTService(privyAppId: string, privyAppSecret: string): PrivyJWTService {
   if (!jwtServiceInstance) {
     jwtServiceInstance = new PrivyJWTService(privyAppId, privyAppSecret)

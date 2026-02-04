@@ -2,15 +2,29 @@ use anchor_lang::prelude::*;
 use crate::state::{MatchState, CustomerState};
 use crate::errors::DroogError;
 
-pub fn init_match(ctx: Context<InitMatch>, match_id: u64, start_ts: i64) -> Result<()> {
+pub fn init_match(
+    ctx: Context<InitMatch>, 
+    match_id_hash: [u8; 32],
+    match_id: Option<u64>,
+    start_ts: i64
+) -> Result<()> {
     let match_state = &mut ctx.accounts.match_state;
     let clock = Clock::get()?;
     
     // Validate match hasn't started yet or just started
     require!(start_ts <= clock.unix_timestamp + 60, DroogError::MatchNotStarted);
     
+    // Derive match_id from hash if not provided (use first 8 bytes as u64)
+    let derived_match_id = match_id.unwrap_or_else(|| {
+        u64::from_le_bytes([
+            match_id_hash[0], match_id_hash[1], match_id_hash[2], match_id_hash[3],
+            match_id_hash[4], match_id_hash[5], match_id_hash[6], match_id_hash[7],
+        ])
+    });
+    
     // Set match details
-    match_state.match_id = match_id;
+    match_state.match_id = derived_match_id;
+    match_state.match_id_hash = match_id_hash; // Store hash for PDA derivation in other instructions
     match_state.start_ts = start_ts;
     match_state.end_ts = start_ts + (30 * 60); // 30 minutes
     match_state.player_a = ctx.accounts.player_a.key();
@@ -45,22 +59,31 @@ pub fn init_match(ctx: Context<InitMatch>, match_id: u64, start_ts: i64) -> Resu
 }
 
 #[derive(Accounts)]
-#[instruction(match_id: u64)]
+#[instruction(match_id_hash: [u8; 32])]
 pub struct InitMatch<'info> {
     #[account(
         init,
         payer = player_a,
         space = MatchState::SIZE,
-        seeds = [b"match", match_id.to_le_bytes().as_ref()],
-        bump
+        seeds = [
+            b"match",
+            match_id_hash.as_ref(),
+            player_a.key().as_ref(),
+            player_b.key().as_ref()
+        ],
+        bump,
+        constraint = player_a.key() < player_b.key() @ DroogError::InvalidPlayerOrder
     )]
     pub match_state: Account<'info, MatchState>,
     
     #[account(mut)]
     pub player_a: Signer<'info>,
     
-    /// CHECK: Player B must sign to confirm match participation
-    pub player_b: Signer<'info>,
+    /// Player B's public key (used for PDA derivation and validation)
+    /// Note: Player B does not need to sign - player_a initiates the match
+    /// The constraint ensures player_a.key() < player_b.key() for deterministic ordering
+    /// CHECK: Player B's pubkey is validated via the constraint above
+    pub player_b: UncheckedAccount<'info>,
     
     /// CHECK: System program
     pub system_program: AccountInfo<'info>,

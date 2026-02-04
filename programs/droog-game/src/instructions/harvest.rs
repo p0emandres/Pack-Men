@@ -3,14 +3,15 @@ use crate::state::MatchState;
 use crate::errors::DroogError;
 
 // Strain growth times in seconds
+// Updated to match new slot-based grow system
 pub const STRAIN_GROWTH_TIMES: [i64; 7] = [
-    240,  // Level 1: Blackberry Kush (4 min)
-    240,  // Level 1: White Widow (4 min)
-    240,  // Level 1: Green Crack (4 min)
-    420,  // Level 2: Blackberry Widow (7 min)
-    420,  // Level 2: White Crack (7 min)
-    420,  // Level 2: Green Kush (7 min)
-    660,  // Level 3: Green Widow Kush (11 min)
+    180,  // Level 1: Blackberry Kush (3 min)
+    180,  // Level 1: White Widow (3 min)
+    180,  // Level 1: Green Crack (3 min)
+    360,  // Level 2: Blackberry Widow (6 min)
+    360,  // Level 2: White Crack (6 min)
+    360,  // Level 2: Green Kush (6 min)
+    600,  // Level 3: Green Widow Kush (10 min)
 ];
 
 // Regrowth lockout times in seconds
@@ -76,8 +77,13 @@ pub fn harvest(
 #[derive(Accounts)]
 pub struct Harvest<'info> {
     #[account(
-        seeds = [b"match", ctx.accounts.match_state.match_id.to_le_bytes().as_ref()],
-        bump = ctx.accounts.match_state.bump
+        seeds = [
+            b"match",
+            match_state.match_id_hash.as_ref(),
+            match_state.player_a.as_ref(),
+            match_state.player_b.as_ref()
+        ],
+        bump = match_state.bump
     )]
     pub match_state: Account<'info, MatchState>,
     

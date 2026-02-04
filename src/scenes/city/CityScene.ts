@@ -3,6 +3,7 @@ import type { PlayerIdentity } from '../../types/identity'
 import { CityPresenceClient, type PlayerPresenceData } from './CityPresenceClient'
 import { CityEntities } from './CityEntities'
 import { CityRenderer } from './CityRenderer'
+import { deliveryIndicatorManager } from '../../game/deliveryIndicators'
 
 /**
  * Callback to get current player state for presence updates.
@@ -84,6 +85,27 @@ export class CityScene {
 
     // Initialize renderer
     this.cityRenderer.initialize()
+
+    // Initialize delivery indicators (async, non-blocking)
+    // Indicators will be added to mainMapGroup and synced with on-chain availability
+    if (this.identity.matchId) {
+      deliveryIndicatorManager.initialize(this.mainMapGroup, this.identity.matchId)
+        .then(() => {
+          console.log('[CityScene] Delivery indicators initialized')
+        })
+        .catch((error) => {
+          console.error('[CityScene] Failed to initialize delivery indicators:', error)
+        })
+    } else {
+      // Initialize without matchId (all indicators visible, no availability tracking)
+      deliveryIndicatorManager.initialize(this.mainMapGroup)
+        .then(() => {
+          console.log('[CityScene] Delivery indicators initialized (no matchId)')
+        })
+        .catch((error) => {
+          console.error('[CityScene] Failed to initialize delivery indicators:', error)
+        })
+    }
 
     // Fetch match participants to determine character models
     // IMPORTANT: Wait for participants before connecting presence client
@@ -375,6 +397,11 @@ export class CityScene {
     // Destroy renderer
     this.cityRenderer.destroy()
 
+    // Destroy delivery indicators
+    if (deliveryIndicatorManager.isInitialized) {
+      deliveryIndicatorManager.destroy()
+    }
+
     console.log('[CityScene] Destroyed')
   }
 
@@ -408,6 +435,11 @@ export class CityScene {
     // Additionally update renderer (for any renderer-specific logic)
     if (!this.isPaused) {
       this.cityRenderer.update(deltaTime)
+      
+      // Update delivery indicators (animations, visibility based on availability)
+      if (deliveryIndicatorManager.isInitialized) {
+        deliveryIndicatorManager.update(deltaTime)
+      }
     }
   }
 }

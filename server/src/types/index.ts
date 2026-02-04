@@ -30,6 +30,7 @@ export type MatchState = {
   readyPlayers: string[] // Array of privyUserId who are ready
   onChainMatchId?: number // Numeric match ID for on-chain PDA
   onChainInitialized?: boolean // Whether on-chain match has been initialized
-  playerAWallet?: string // Player A Solana wallet address
-  playerBWallet?: string // Player B Solana wallet address
+  playerAWallet?: string // Player A Solana wallet address (sorted deterministically)
+  playerBWallet?: string // Player B Solana wallet address (sorted deterministically)
+  participantWallets?: Map<string, string> // Map of privyUserId -> walletAddress (temporary, used to derive playerA/playerB)
 }

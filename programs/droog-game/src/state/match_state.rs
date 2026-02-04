@@ -4,6 +4,7 @@ use crate::state::customer_state::CustomerState;
 #[account]
 pub struct MatchState {
     pub match_id: u64,                    // Unique match identifier
+    pub match_id_hash: [u8; 32],          // 32-byte hash used for PDA seeds (canonical)
     pub start_ts: i64,                    // Match start timestamp
     pub end_ts: i64,                      // Match end timestamp (start + 30 min)
     pub player_a: Pubkey,                 // Player A wallet
@@ -18,11 +19,29 @@ pub struct MatchState {
 }
 
 impl MatchState {
-    pub const SIZE: usize = 8 + 8 + 8 + 32 + 32 + (23 * CustomerState::SIZE) + 4 + 4 + 4 + 4 + 1 + 1;
+    pub const SIZE: usize = 8 + 32 + 8 + 8 + 32 + 32 + (23 * CustomerState::SIZE) + 4 + 4 + 4 + 4 + 1 + 1;
     
     // Reputation bounds to prevent overflow/underflow
     pub const REP_MIN: i32 = -1000;
     pub const REP_MAX: i32 = 1000;
+    
+    /// AUTHORITATIVE layer derivation from customer_index.
+    /// This is the CANONICAL way to determine layer from index.
+    /// Layer is NEVER stored - always derived.
+    /// 
+    /// Index ranges:
+    /// - 0-2:   Layer 3 (Inner Core)
+    /// - 3-10:  Layer 2 (Middle Ring)
+    /// - 11-22: Layer 1 (Outer Ring)
+    pub fn layer_from_index(customer_index: u8) -> u8 {
+        if customer_index < 3 {
+            3  // Inner Core
+        } else if customer_index < 11 {
+            2  // Middle Ring
+        } else {
+            1  // Outer Ring
+        }
+    }
     
     pub fn get_customer_cooldown(layer: u8) -> i64 {
         match layer {
@@ -31,6 +50,12 @@ impl MatchState {
             3 => 75,   // 75 seconds
             _ => 0,
         }
+    }
+    
+    /// Get cooldown for a customer by index (derives layer automatically)
+    pub fn get_cooldown_for_customer(customer_index: u8) -> i64 {
+        let layer = Self::layer_from_index(customer_index);
+        Self::get_customer_cooldown(layer)
     }
     
     pub fn is_customer_available(&self, customer_index: usize, current_ts: i64) -> bool {
@@ -43,22 +68,32 @@ impl MatchState {
             return true;
         }
         
-        let cooldown = Self::get_customer_cooldown(customer.layer);
+        // Derive layer from index (authoritative)
+        let layer = Self::layer_from_index(customer_index as u8);
+        let cooldown = Self::get_customer_cooldown(layer);
         current_ts >= customer.last_served_ts + cooldown
     }
     
+    /// Validate strain for customer. Layer is derived from customer_index.
     pub fn validate_strain_for_customer(&self, customer_index: usize, strain_level: u8) -> bool {
         if customer_index >= 23 {
             return false;
         }
         
-        let customer = &self.customers[customer_index];
-        match customer.layer {
+        // Derive layer from index (authoritative - never trust stored layer)
+        let layer = Self::layer_from_index(customer_index as u8);
+        match layer {
             1 => strain_level == 1,
             2 => strain_level == 1 || strain_level == 2,
             3 => strain_level == 2 || strain_level == 3,
             _ => false,
         }
+    }
+    
+    /// Get reputation change. Accepts customer_index to derive layer.
+    pub fn get_reputation_change_for_customer(customer_index: u8, strain_level: u8) -> i32 {
+        let layer = Self::layer_from_index(customer_index);
+        Self::get_reputation_change(layer, strain_level)
     }
     
     pub fn get_reputation_change(customer_layer: u8, strain_level: u8) -> i32 {
