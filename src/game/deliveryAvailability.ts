@@ -80,12 +80,17 @@ export function getRotationBucket(timestampSeconds: number): bigint {
  * @returns 64-bit seed value
  */
 export function computeDeliverySeed(matchId: bigint, currentTs: number): bigint {
+  // Type guard to ensure matchId is actually a bigint
+  if (typeof matchId !== 'bigint') {
+    throw new TypeError(`matchId must be bigint, got ${typeof matchId}`)
+  }
+  
   const timestampBucket = BigInt(Math.floor(currentTs / DELIVERY_ROTATION_INTERVAL));
   
   // Simple deterministic hash using XOR and multiplication
   // Must match on-chain algorithm exactly
-  let hash = matchId;
-  hash ^= timestampBucket;
+  let hash = matchId; // Already bigint
+  hash = hash ^ timestampBucket; // Both are bigint, explicit operation
   
   // Avalanche mixing (using BigInt for 64-bit operations)
   hash = wrappingMul64(hash, 0x517cc1b727220a95n);

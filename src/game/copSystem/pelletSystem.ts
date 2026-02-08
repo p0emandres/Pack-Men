@@ -134,13 +134,136 @@ export class PelletSystem {
    */
   initialize(): void {
     if (this.roadTiles.size === 0) {
-      const tileKey = shuffled[i]
-      const [x, z] = tileKey.split(',').map(Number)
-      this.spawnPellet(x, z)
+      console.warn('[PelletSystem] No road tiles set, cannot spawn pellets')
+      return
     }
     
+    // Shuffle road tiles and spawn initial pellets
+    const tileArray = Array.from(this.roadTiles)
+    const shuffled = tileArray.sort(() => Math.random() - 0.5)
+    const initialCount = Math.min(PELLET_CONFIG.maxPellets / 2, shuffled.length)
+    
+    for (let i = 0; i < initialCount; i++) {
       const [x, z] = shuffled[i].split(',').map(Number)
       this.spawnPellet(x, z)
+    }
+  }
+
+  /**
+   * Spawn a single pellet at position.
+   */
+  private spawnPellet(x: number, z: number): void {
+    if (this.pellets.size >= PELLET_CONFIG.maxPellets) return
+    
+    const id = `pellet_${this.pelletIdCounter++}`
+    const mesh = new THREE.Mesh(this.pelletGeometry, this.pelletMaterial.clone())
+    mesh.position.set(x, PELLET_CONFIG.radius + 0.1, z)
+    
+    this.scene.add(mesh)
+    this.pellets.set(id, {
+      id,
+      position: mesh.position.clone(),
+      mesh,
+      isCollected: false,
+    })
+  }
+
+  /**
+   * Update pellets (call each frame).
+   */
+  update(playerPosition: THREE.Vector3, deltaTime: number): PelletCollectedEvent | null {
+    if (this.isDestroyed) return null
+    
+    // Check for collection
+    for (const pellet of this.pellets.values()) {
+      if (pellet.isCollected) continue
+      
+      const distance = playerPosition.distanceTo(pellet.position)
+      if (distance < PELLET_CONFIG.collectRadius) {
+        pellet.isCollected = true
+        this.scene.remove(pellet.mesh)
+        this.pellets.delete(pellet.id)
+        
+        // Award XP (client-only)
+        this.xp += 10
+        
+        // Determine random effect
+        const effects: PelletEffect[] = ['HESITATE', 'SLOW_TURN', 'RETARGET']
+        const effect = effects[Math.floor(Math.random() * effects.length)]
+        
+        const event: PelletCollectedEvent = {
+          pelletId: pellet.id,
+          collectedBy: 'local',
+          position: pellet.position.clone(),
+          effect,
+        }
+        
+        // Notify listeners
+        for (const listener of this.collectionListeners) {
+          try {
+            listener(event)
+          } catch (error) {
+            console.error('[PelletSystem] Error in collection listener:', error)
+          }
+        }
+        
+        return event
+      }
+    }
+    
+    // Check for respawn
+    const now = Date.now()
+    if (now - this.lastSpawnTime > PELLET_CONFIG.respawnInterval) {
+      this.lastSpawnTime = now
+      this.trySpawnPellet()
+    }
+    
+    // Animate pellets (bobbing)
+    for (const pellet of this.pellets.values()) {
+      pellet.mesh.position.y = PELLET_CONFIG.radius + 0.1 + Math.sin(now * 0.003 + pellet.position.x) * 0.1
+      pellet.mesh.rotation.y += deltaTime * 2
+    }
+    
+    return null
+  }
+
+  /**
+   * Try to spawn a new pellet on a random road tile.
+   */
+  private trySpawnPellet(): void {
+    if (this.pellets.size >= PELLET_CONFIG.maxPellets) return
+    if (this.roadTiles.size === 0) return
+    
+    if (Math.random() > PELLET_CONFIG.spawnDensity * this.roadTiles.size) return
+    
+    const tileArray = Array.from(this.roadTiles)
+    const randomTile = tileArray[Math.floor(Math.random() * tileArray.length)]
+    const [x, z] = randomTile.split(',').map(Number)
+    
+    this.spawnPellet(x, z)
+  }
+
+  /**
+   * Get XP (client-only).
+   */
+  getXP(): number {
+    return this.xp
+  }
+
+  /**
+   * Add collection listener.
+   */
+  addCollectionListener(listener: (event: PelletCollectedEvent) => void): void {
+    this.collectionListeners.push(listener)
+  }
+
+  /**
+   * Remove collection listener.
+   */
+  removeCollectionListener(listener: (event: PelletCollectedEvent) => void): void {
+    const index = this.collectionListeners.indexOf(listener)
+    if (index !== -1) {
+      this.collectionListeners.splice(index, 1)
     }
   }
 

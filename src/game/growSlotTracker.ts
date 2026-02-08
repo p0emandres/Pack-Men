@@ -1,4 +1,5 @@
 import { getCurrentMatchTime } from './timeUtils'
+import { BN } from '@coral-xyz/anchor'
 import {
   type GrowSlot,
   type Inventory,
@@ -85,28 +86,60 @@ export class GrowSlotTracker {
   private matchStartTs: number = 0
   private matchEndTs: number = 0
   private playerPubkey: string = ''
+  private listeners: Set<() => void> = new Set()
+
+  /**
+   * Subscribe to state changes
+   * @param listener - Callback function to be called when state updates
+   * @returns Unsubscribe function
+   */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => this.unsubscribe(listener)
+  }
+
+  /**
+   * Unsubscribe from state changes
+   * @param listener - Callback function to remove
+   */
+  unsubscribe(listener: () => void): void {
+    this.listeners.delete(listener)
+  }
+
+  /**
+   * Notify all registered listeners of state changes
+   */
+  private notifyListeners(): void {
+    this.listeners.forEach(listener => {
+      try {
+        listener()
+      } catch (error) {
+        console.error('[GrowSlotTracker] Listener error:', error)
+      }
+    })
+  }
 
   /**
    * Update the cached grow state from chain
    */
   updateGrowState(growState: GrowState | null): void {
-    this.growState = growState
-    
     if (import.meta.env.DEV && growState) {
-      console.log('[GrowSlotTracker] Updated grow state:', {
-        matchId: growState.matchId?.toString?.() || growState.matchId,
-        playerA: typeof growState.playerA === 'string' 
-          ? growState.playerA 
-          : growState.playerA.toBase58(),
-        playerB: typeof growState.playerB === 'string' 
-          ? growState.playerB 
-          : growState.playerB.toBase58(),
-        playerASlots: growState.playerASlots?.length || 0,
-        playerBSlots: growState.playerBSlots?.length || 0,
-        currentPlayerPubkey: this.playerPubkey,
-        isPlayerA: this.isPlayerA(),
+      console.log('[GrowSlotTracker] updateGrowState called')
+      console.log('[GrowSlotTracker] Current playerPubkey:', this.playerPubkey)
+      console.log('[GrowSlotTracker] GrowState playerA:', 
+        typeof growState.playerA === 'string' ? growState.playerA : growState.playerA?.toBase58?.())
+      console.log('[GrowSlotTracker] GrowState playerB:', 
+        typeof growState.playerB === 'string' ? growState.playerB : growState.playerB?.toBase58?.())
+      
+      // Log each slot's state
+      growState.playerASlots?.forEach((slot: GrowSlot, i: number) => {
+        const kind = slot.plantState?.__kind || 'unknown'
+        console.log(`[GrowSlotTracker] Player A Slot ${i}: ${kind}`, 
+          kind === 'Growing' ? `(strainLevel: ${(slot.plantState as any).strainLevel})` : '')
       })
     }
+    this.growState = growState
+    this.notifyListeners()
   }
 
   /**
@@ -115,6 +148,7 @@ export class GrowSlotTracker {
   setMatchTiming(startTs: number, endTs: number): void {
     this.matchStartTs = startTs
     this.matchEndTs = endTs
+    this.notifyListeners()
   }
 
   /**
@@ -122,6 +156,7 @@ export class GrowSlotTracker {
    */
   setPlayer(pubkey: string): void {
     this.playerPubkey = pubkey
+    this.notifyListeners()
   }
 
   /**
@@ -137,17 +172,6 @@ export class GrowSlotTracker {
     
     const isA = playerAAddress === this.playerPubkey
     
-    if (import.meta.env.DEV) {
-      console.log('[GrowSlotTracker] Player identification:', {
-        playerPubkey: this.playerPubkey,
-        playerA: playerAAddress,
-        playerB: typeof this.growState.playerB === 'string' 
-          ? this.growState.playerB 
-          : this.growState.playerB.toBase58(),
-        isPlayerA: isA,
-      })
-    }
-    
     return isA
   }
 
@@ -156,9 +180,8 @@ export class GrowSlotTracker {
    */
   private getPlayerSlots(): GrowSlot[] {
     if (!this.growState) return []
-    return this.isPlayerA()
-      ? this.growState.playerASlots
-      : this.growState.playerBSlots
+    const isPlayerA = this.isPlayerA()
+    return isPlayerA ? this.growState.playerASlots : this.growState.playerBSlots
   }
 
   /**
@@ -174,18 +197,14 @@ export class GrowSlotTracker {
   }
 
   /**
-   * Compute current time using match-anchored timing
+   * Compute current time using direct absolute timestamp
    */
   private getCurrentTs(overrideTs?: number): number {
     if (overrideTs !== undefined) {
       return overrideTs
     }
-    // Safety check: if matchStartTs is not initialized (0 or negative), use system time as fallback
-    if (this.matchStartTs <= 0) {
-      console.warn('[GrowSlotTracker] matchStartTs not initialized, using system time')
-      return Date.now() / 1000
-    }
-    return getCurrentMatchTime(this.matchStartTs)
+    // Direct absolute timestamp - no anchoring needed
+    return Date.now() / 1000
   }
 
   /**
@@ -252,23 +271,38 @@ export class GrowSlotTracker {
     const slot = slots[slotIndex]
     
     // Handle new PlantState structure
+    // Derive occupied and harvested from plantState for consistency
     let plantedTs = 0
     let readyTs = 0
     let isGrowing = false
     let isReady = false
+    let derivedOccupied = false
+    let derivedHarvested = false
+    let derivedStrainLevel = 0
     
     if (slot.plantState) {
       // New structure: use plantState enum
       if (slot.plantState.__kind === 'Growing') {
+        derivedOccupied = true
+        derivedHarvested = false
+        derivedStrainLevel = slot.plantState.strainLevel
+        
         // planted_at from chain is absolute Unix timestamp (same as currentTs from getCurrentMatchTime)
-        plantedTs = typeof slot.plantState.plantedAt === 'number'
-          ? slot.plantState.plantedAt
-          : slot.plantState.plantedAt.toNumber()
+        const rawPlantedAt = slot.plantState.plantedAt
+        
+        plantedTs = typeof rawPlantedAt === 'number'
+          ? rawPlantedAt
+          : rawPlantedAt.toNumber()
+        
         const growthTime = GROWTH_TIMES[slot.plantState.strainLevel as 1 | 2 | 3] || 0
         readyTs = plantedTs + growthTime
         isGrowing = currentTs < readyTs
         isReady = currentTs >= readyTs
       } else if (slot.plantState.__kind === 'Ready') {
+        derivedOccupied = true
+        derivedHarvested = false
+        derivedStrainLevel = slot.plantState.strainLevel
+        
         // Ready state: plant is ready for harvest
         // We don't have planted_at, so calculate backwards from current time
         const growthTime = GROWTH_TIMES[slot.plantState.strainLevel as 1 | 2 | 3] || 0
@@ -277,7 +311,10 @@ export class GrowSlotTracker {
         isGrowing = false
         isReady = true
       } else {
-        // Empty state
+        // Empty state - slot is available for planting
+        derivedOccupied = false
+        derivedHarvested = false
+        derivedStrainLevel = 0
         plantedTs = 0
         readyTs = 0
         isGrowing = false
@@ -285,6 +322,10 @@ export class GrowSlotTracker {
       }
     } else {
       // Fallback to legacy structure
+      derivedOccupied = slot.occupied
+      derivedHarvested = slot.harvested
+      derivedStrainLevel = slot.strainLevel
+      
       plantedTs = typeof slot.plantedTs === 'number'
         ? slot.plantedTs
         : slot.plantedTs.toNumber()
@@ -297,11 +338,8 @@ export class GrowSlotTracker {
     
     // Calculate growth progress
     let growthProgress = 0
-    if (slot.occupied || (slot.plantState && slot.plantState.__kind !== 'Empty')) {
-      const strainLevel = slot.plantState?.__kind === 'Growing' || slot.plantState?.__kind === 'Ready'
-        ? slot.plantState.strainLevel
-        : slot.strainLevel
-      const growthTime = GROWTH_TIMES[strainLevel as 1 | 2 | 3] || 0
+    if (derivedOccupied) {
+      const growthTime = GROWTH_TIMES[derivedStrainLevel as 1 | 2 | 3] || 0
       if (growthTime > 0 && plantedTs > 0) {
         const elapsed = currentTs - plantedTs
         growthProgress = Math.min(1, Math.max(0, elapsed / growthTime))
@@ -315,13 +353,13 @@ export class GrowSlotTracker {
     
     return {
       slotIndex,
-      occupied: slot.occupied,
-      strainLevel: slot.strainLevel,
+      occupied: derivedOccupied,
+      strainLevel: derivedStrainLevel,
       variantId: slot.variantId,
       variantName: getVariantName(slot.variantId),
       plantedTs,
       readyTs,
-      harvested: slot.harvested,
+      harvested: derivedHarvested,
       isGrowing,
       isReady,
       growthProgress,
@@ -376,24 +414,6 @@ export class GrowSlotTracker {
       harvestedSlots,
       canPlant,
       timeUntilEndgameLock,
-    }
-    
-    if (import.meta.env.DEV) {
-      console.log('[GrowSlotTracker] Summary generated:', {
-        currentTs,
-        matchStartTs: this.matchStartTs,
-        matchEndTs: this.matchEndTs,
-        playerPubkey: this.playerPubkey,
-        hasGrowState: !!this.growState,
-        slotsCount: slotStatuses.length,
-        occupiedSlots: slotStatuses.filter(s => s.occupied).length,
-        availableSlots,
-        growingSlots,
-        readySlots,
-        harvestedSlots,
-        totalSmell,
-        inventory: summary.inventory,
-      })
     }
     
     return summary
@@ -506,6 +526,38 @@ export class GrowSlotTracker {
       level1: Math.max(0, level1Cutoff - currentTs),
       level2: Math.max(0, level2Cutoff - currentTs),
       level3: Math.max(0, level3Cutoff - currentTs),
+    }
+  }
+
+  /**
+   * Reconcile state from chain (periodic reconciliation to recover from dropped subscriptions)
+   * This is a pure read operation - no mutation unless state differs
+   * 
+   * @param client - DroogGameClient instance
+   * @param matchId - Match ID (number, BN, or bigint)
+   * @returns Promise resolving to true if state was updated, false otherwise
+   */
+  async reconcileFromChain(client: any, matchId: number | BN | bigint): Promise<boolean> {
+    try {
+      // Fetch authoritative state with finalized commitment
+      const chainState = await client.getGrowState(matchId, 'finalized')
+      
+      if (!chainState) {
+        return false
+      }
+      
+      // Check if state differs from cached state
+      const stateChanged = this.growState === null || 
+        JSON.stringify(this.growState) !== JSON.stringify(chainState)
+      
+      if (stateChanged) {
+        this.updateGrowState(chainState)
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error('[GrowSlotTracker] Reconciliation error:', error)
+      return false
     }
   }
 

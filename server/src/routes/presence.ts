@@ -98,23 +98,11 @@ function distance3D(p1: { x: number; y: number; z: number }, p2: { x: number; y:
  * - Never broadcast per-message
  * - Spatial filtering: Only send players within relevance distance
  */
-const lastBroadcastLogTime = new Map<string, number>()
-let broadcastCallCount = 0
 function broadcastPresence(matchId: string): void {
-  broadcastCallCount++
   const matchPresence = presenceStore.get(matchId)
   
   const serverTs = Date.now()
   
-  // Log EVERY broadcast call (for debugging)
-  const lastLog = lastBroadcastLogTime.get(matchId) || 0
-  const shouldLog = serverTs - lastLog > 2000 // Log every 2 seconds
-  if (shouldLog) {
-    lastBroadcastLogTime.set(matchId, serverTs)
-    const presenceCount = matchPresence ? matchPresence.size : 0
-    const connectionCount = Array.from(activeConnections.entries()).filter(([_, c]) => c.matchId === matchId).length
-    console.log(`[Presence] BROADCAST #${broadcastCallCount}: match=${matchId.slice(-8)}, presences=${presenceCount}, connections=${connectionCount}`)
-  }
   
   if (!matchPresence) {
     return
@@ -147,12 +135,6 @@ function broadcastPresence(matchId: string): void {
         } else {
           // No position yet, send all
           relevantPresences = allPresences
-        }
-
-        // DEBUG: Log what's being sent (throttled)
-        if (shouldLog) {
-          const remotePresences = relevantPresences.filter(p => p.playerId !== privyUserId)
-          console.log(`[Presence] Sending to ${privyUserId.slice(-8)}: total=${relevantPresences.length}, remote=${remotePresences.length}, hasMyPresence=${!!myPresence}`)
         }
 
         connection.socket.send(JSON.stringify({
@@ -418,14 +400,9 @@ export async function presenceRoutes(fastify: FastifyInstance) {
         serverTs: now,
       }))
 
-      // Log when message handler is registered
-      console.log(`[Presence] Message handler registered for ${privyUserId}`)
-      
       // Handle incoming messages
       socket.addEventListener('message', (event) => {
         const message = event.data
-        // Debug: Log raw message received
-        console.log(`[Presence] RAW MESSAGE from ${privyUserId.slice(-8)}: type=${typeof message}`)
         
         try {
           // Handle different message formats
@@ -442,12 +419,8 @@ export async function presenceRoutes(fastify: FastifyInstance) {
             messageStr = String(message)
           }
           
-          console.log(`[Presence] Parsed message string from ${privyUserId.slice(-8)}: ${messageStr.slice(0, 100)}...`)
-          
           const data = JSON.parse(messageStr)
           const serverTs = Date.now()
-          
-          console.log(`[Presence] Message type from ${privyUserId.slice(-8)}: ${data.type}`)
           
           // Update lastActivity for ghost cleanup
           const conn = activeConnections.get(privyUserId)
@@ -456,8 +429,6 @@ export async function presenceRoutes(fastify: FastifyInstance) {
           }
           
           if (data.type === 'presence_update') {
-            console.log(`[Presence] ENTERED presence_update block for ${privyUserId.slice(-8)}`)
-            
             try {
               // Update player's presence with server-assigned timestamp
               // Best Practice: serverTs is assigned by the presence server, clients never trust client clocks
@@ -470,7 +441,6 @@ export async function presenceRoutes(fastify: FastifyInstance) {
               }
 
               let matchPresence = presenceStore.get(matchId)
-              console.log(`[Presence] presenceStore.get(${matchId}) returned: ${matchPresence ? 'Map with ' + matchPresence.size + ' entries' : 'undefined'}`)
               
               // DEBUG: Check if presenceStore has this match
               if (!matchPresence) {
@@ -479,12 +449,7 @@ export async function presenceRoutes(fastify: FastifyInstance) {
                 matchPresence = presenceStore.get(matchId)!
               }
               
-              const isNewPresence = !matchPresence.has(privyUserId)
               matchPresence.set(privyUserId, presence)
-              console.log(`[Presence] Stored presence for ${privyUserId.slice(-8)}, isNew: ${isNewPresence}, total: ${matchPresence.size}`)
-              if (isNewPresence) {
-                console.log(`[Presence] New presence from ${privyUserId.slice(-8)} in match ${matchId}, total presences: ${matchPresence.size}`)
-              }
             } catch (presenceError) {
               console.error(`[Presence] ERROR in presence_update block:`, presenceError)
             }

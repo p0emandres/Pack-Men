@@ -113,6 +113,46 @@ export class CaptureSystem {
   handleCapture(event: CaptureEvent): void {
     const player = this.players.get(event.capturedPlayerId)
     if (!player) {
+      return // Player not registered
+    }
+    
+    // Don't capture if already incapacitated
+    if (player.state === 'INCAPACITATED') {
+      return
+    }
+    
+    const now = Date.now()
+    const previousState = player.state
+    
+    // Update player state
+    player.state = 'INCAPACITATED'
+    player.capturedAt = now
+    player.timeoutEndAt = now + CAPTURE_TIMEOUT_MS
+    player.capturedByPersonality = event.copPersonality
+    player.respawnPosition = this.playerRoomPositions.get(event.capturedPlayerId) || null
+    
+    // Start camera shake for local player
+    if (event.capturedPlayerId === this.localPlayerId) {
+      this.cameraShakeActive = true
+      this.cameraShakeIntensity = CAMERA_SHAKE.intensity
+      this.cameraShakeStartTime = now
+    }
+    
+    // Notify listeners
+    this.notifyStateChange({
+      playerId: event.capturedPlayerId,
+      previousState,
+      newState: 'INCAPACITATED',
+      capturedBy: event.copPersonality,
+      timeoutRemaining: CAPTURE_TIMEOUT_MS,
+    })
+  }
+
+  /**
+   * Update method - call each frame.
+   * Handles timeout expiration and respawn.
+   */
+  update(): { shouldRespawn: boolean; respawnPosition: THREE.Vector3 | null } {
     const now = Date.now()
     let localRespawn = { shouldRespawn: false, respawnPosition: null as THREE.Vector3 | null }
     
@@ -120,3 +160,129 @@ export class CaptureSystem {
       if (player.state === 'INCAPACITATED' && player.timeoutEndAt) {
         if (now >= player.timeoutEndAt) {
           // Timeout expired - reset player
+          const previousState = player.state
+          player.state = 'ACTIVE'
+          player.capturedAt = null
+          player.timeoutEndAt = null
+          player.capturedByPersonality = null
+          
+          // Notify listeners
+          this.notifyStateChange({
+            playerId,
+            previousState,
+            newState: 'ACTIVE',
+          })
+          
+          // Check if this is local player for respawn
+          if (playerId === this.localPlayerId && player.respawnPosition) {
+            localRespawn = {
+              shouldRespawn: true,
+              respawnPosition: player.respawnPosition.clone(),
+            }
+          }
+          
+          player.respawnPosition = null
+        }
+      }
+    }
+    
+    // Update camera shake
+    if (this.cameraShakeActive) {
+      const elapsed = now - this.cameraShakeStartTime
+      if (elapsed >= CAMERA_SHAKE.duration) {
+        this.cameraShakeActive = false
+        this.cameraShakeIntensity = 0
+      } else {
+        this.cameraShakeIntensity = CAMERA_SHAKE.intensity * 
+          Math.pow(CAMERA_SHAKE.decay, elapsed / 100)
+      }
+    }
+    
+    return localRespawn
+  }
+
+  /**
+   * Get player state.
+   */
+  getPlayerState(playerId: string): PlayerCaptureState {
+    return this.players.get(playerId)?.state || 'ACTIVE'
+  }
+
+  /**
+   * Get timeout remaining for a player.
+   */
+  getTimeoutRemaining(playerId: string): number {
+    const player = this.players.get(playerId)
+    if (!player || !player.timeoutEndAt) return 0
+    return Math.max(0, player.timeoutEndAt - Date.now())
+  }
+
+  /**
+   * Check if local player is incapacitated.
+   */
+  isLocalPlayerIncapacitated(): boolean {
+    return this.getPlayerState(this.localPlayerId) === 'INCAPACITATED'
+  }
+
+  /**
+   * Get camera shake offset for rendering.
+   */
+  getCameraShakeOffset(): THREE.Vector3 {
+    if (!this.cameraShakeActive) {
+      return new THREE.Vector3()
+    }
+    return new THREE.Vector3(
+      (Math.random() - 0.5) * this.cameraShakeIntensity,
+      (Math.random() - 0.5) * this.cameraShakeIntensity,
+      (Math.random() - 0.5) * this.cameraShakeIntensity
+    )
+  }
+
+  /**
+   * Add state change listener.
+   */
+  addStateChangeListener(listener: (event: CaptureStateChange) => void): void {
+    this.stateChangeListeners.push(listener)
+  }
+
+  /**
+   * Remove state change listener.
+   */
+  removeStateChangeListener(listener: (event: CaptureStateChange) => void): void {
+    const index = this.stateChangeListeners.indexOf(listener)
+    if (index !== -1) {
+      this.stateChangeListeners.splice(index, 1)
+    }
+  }
+
+  /**
+   * Notify all listeners of state change.
+   */
+  private notifyStateChange(event: CaptureStateChange): void {
+    for (const listener of this.stateChangeListeners) {
+      try {
+        listener(event)
+      } catch (error) {
+        console.error('[CaptureSystem] Error in state change listener:', error)
+      }
+    }
+  }
+
+  /**
+   * Reset system (for match restart).
+   */
+  reset(): void {
+    for (const player of this.players.values()) {
+      player.state = 'ACTIVE'
+      player.capturedAt = null
+      player.timeoutEndAt = null
+      player.capturedByPersonality = null
+      player.respawnPosition = null
+    }
+    this.cameraShakeActive = false
+    this.cameraShakeIntensity = 0
+  }
+}
+
+// Singleton instance
+export const captureSystem = new CaptureSystem()

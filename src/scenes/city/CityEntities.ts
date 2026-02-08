@@ -112,19 +112,13 @@ export class CityEntities {
       oldParticipants.some((p, i) => p !== participants[i])
     
     this.participants = participants
-    console.log(`[CityEntities] Participants updated: [${participants.map((p, i) => `Index ${i} (${i === 0 ? 'Casual_Hoodie' : 'Casual_2'}): ${p}`).join(', ')}]`)
     
     // If participants changed or weren't set before, respawn all existing avatars
     // This ensures correct character assignment
     if (participantsChanged && this.avatars.size > 0) {
-      console.log(`[CityEntities] Participants changed, respawning ${this.avatars.size} existing avatar(s) with correct characters`)
       const avatarsToRespawn: Array<{playerId: string, presence: PlayerPresenceData}> = []
       
       for (const [playerId, avatar] of this.avatars.entries()) {
-        const expectedPath = this.getCharacterPathForPlayer(playerId)
-        const expectedName = expectedPath.includes('Casual_2') ? 'Casual_2' : 'Casual_Hoodie'
-        console.log(`[CityEntities] Will respawn avatar for ${playerId} with correct character: ${expectedName}`)
-        
         // Store current presence data for respawn (use rendered position from buffer)
         const presence: PlayerPresenceData = {
           playerId,
@@ -147,17 +141,9 @@ export class CityEntities {
       
       // Then respawn with correct characters
       for (const {playerId, presence} of avatarsToRespawn) {
-        console.log(`[CityEntities] Respawning avatar for ${playerId}`)
         this.spawn(playerId, presence).catch((error) => {
           console.error(`[CityEntities] Error respawning avatar for ${playerId}:`, error)
         })
-      }
-    } else if (this.avatars.size > 0) {
-      // Just log what characters should be used
-      for (const [playerId] of this.avatars.entries()) {
-        const expectedPath = this.getCharacterPathForPlayer(playerId)
-        const expectedName = expectedPath.includes('Casual_2') ? 'Casual_2' : 'Casual_Hoodie'
-        console.log(`[CityEntities] Avatar for ${playerId} should be ${expectedName} (no respawn needed)`)
       }
     }
   }
@@ -168,24 +154,19 @@ export class CityEntities {
    */
   private getCharacterPathForPlayer(playerId: string): string {
     if (this.participants.length === 0) {
-      console.warn(`[CityEntities] Participants not set yet for player ${playerId}, defaulting to Casual_2`)
       return '/buildings/character/Casual_2.gltf'
     }
     
     const playerIndex = this.participants.indexOf(playerId)
     if (playerIndex === -1) {
       // Player not found in participants, default to Casual_2 (was the old behavior)
-      console.warn(`[CityEntities] Player ${playerId} not found in participants [${this.participants.join(', ')}], defaulting to Casual_2`)
       return '/buildings/character/Casual_2.gltf'
     }
     
     // Player 1 (index 0) = Casual_Hoodie, Player 2 (index 1) = Casual_2
-    const characterPath = playerIndex === 0 
+    return playerIndex === 0 
       ? '/buildings/character/Casual_Hoodie.gltf'
       : '/buildings/character/Casual_2.gltf'
-    
-    console.log(`[CityEntities] Player ${playerId} is at index ${playerIndex} in participants, using ${playerIndex === 0 ? 'Casual_Hoodie' : 'Casual_2'}`)
-    return characterPath
   }
 
   /**
@@ -199,7 +180,6 @@ export class CityEntities {
       const cached = this.avatarModels.get(characterPath)!
       const cloned = SkeletonUtils.clone(cached) as THREE.Group
       const animations = this.avatarAnimations.get(characterPath) || []
-      console.log(`[CityEntities] Using cached model for ${characterPath}, cloned with SkeletonUtils, ${animations.length} animations`)
       return { model: cloned, animations }
     }
 
@@ -207,54 +187,35 @@ export class CityEntities {
     if (this.loadingPromises.has(characterPath)) {
       const { model, animations } = await this.loadingPromises.get(characterPath)!
       const cloned = SkeletonUtils.clone(model) as THREE.Group
-      console.log(`[CityEntities] Model was loading, now cloned with SkeletonUtils`)
       return { model: cloned, animations }
     }
 
     const loadingPromise = new Promise<{ model: THREE.Group; animations: THREE.AnimationClip[] }>((resolve, reject) => {
-      console.log(`[CityEntities] Loading avatar model from ${characterPath}`)
       this.loader.load(
         characterPath,
         (gltf) => {
           const model = gltf.scene
           const animations = gltf.animations || []
-          console.log(`[CityEntities] GLTF loaded for ${characterPath}, found ${animations.length} animations`)
-          
-          // Log animation names
-          if (animations.length > 0) {
-            console.log(`[CityEntities] Animation names: ${animations.map(a => a.name).join(', ')}`)
-          }
 
-          // Count what's in the model
-          let meshCount = 0
-          let skinnedMeshCount = 0
+          // Set up shadows for meshes
           model.traverse((child) => {
-            if (child instanceof THREE.SkinnedMesh) {
-              skinnedMeshCount++
-              child.castShadow = true
-              child.receiveShadow = true
-            } else if (child instanceof THREE.Mesh) {
-              meshCount++
+            if (child instanceof THREE.SkinnedMesh || child instanceof THREE.Mesh) {
               child.castShadow = true
               child.receiveShadow = true
             }
           })
-          console.log(`[CityEntities] Model contains ${meshCount} meshes, ${skinnedMeshCount} skinned meshes`)
 
           // Scale if needed (same logic as local player)
           const box = new THREE.Box3().setFromObject(model)
           const size = box.getSize(new THREE.Vector3())
           const maxDimension = Math.max(size.x, size.y, size.z)
-          console.log(`[CityEntities] Model dimensions: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)}), max=${maxDimension.toFixed(2)}`)
 
           if (maxDimension > 5) {
             const scale = 2 / maxDimension
             model.scale.set(scale, scale, scale)
-            console.log(`[CityEntities] Scaled down model to ${scale.toFixed(3)}`)
           } else if (maxDimension < 0.5) {
             const scale = 1.5 / maxDimension
             model.scale.set(scale, scale, scale)
-            console.log(`[CityEntities] Scaled up model to ${scale.toFixed(3)}`)
           }
 
           // Center the model at origin
@@ -280,7 +241,6 @@ export class CityEntities {
     // Wait for load then return a clone with animations
     const { model: loadedModel, animations } = await loadingPromise
     const cloned = SkeletonUtils.clone(loadedModel) as THREE.Group
-    console.log(`[CityEntities] Freshly loaded model cloned with SkeletonUtils`)
     return { model: cloned, animations }
   }
 
@@ -288,23 +248,16 @@ export class CityEntities {
    * Spawn a new remote player avatar.
    */
   async spawn(playerId: string, initialPresence: PlayerPresenceData): Promise<void> {
-    console.log(`%c[CityEntities] 🚀 SPAWN REQUESTED for ${playerId.slice(-8)} at (${initialPresence.position.x.toFixed(2)}, ${initialPresence.position.y.toFixed(2)}, ${initialPresence.position.z.toFixed(2)})`, 'background: #ff5722; color: white; font-weight: bold; font-size: 14px;')
-    console.log(`[CityEntities] spawn() state: isDestroyed=${this.isDestroyed}, hasAvatar=${this.avatars.has(playerId)}, isSpawning=${this.spawningPlayers.has(playerId)}`)
-    console.log(`[CityEntities] Scene reference valid: ${!!this.scene}, scene.children.length: ${this.scene?.children.length ?? 'N/A'}`)
-    
     if (this.isDestroyed) {
-      console.warn(`[CityEntities] Cannot spawn avatar for ${playerId}: CityEntities is destroyed`)
       return
     }
     
     if (this.avatars.has(playerId)) {
-      console.log(`[CityEntities] Avatar for player ${playerId} already exists, skipping spawn`)
       return
     }
 
     // Check if already spawning (prevents duplicate spawns during async model loading)
     if (this.spawningPlayers.has(playerId)) {
-      console.log(`[CityEntities] Avatar for player ${playerId} is already being spawned, skipping duplicate spawn`)
       return
     }
 
@@ -318,17 +271,12 @@ export class CityEntities {
 
     try {
       // Determine which character to load for this player
-      console.log(`[CityEntities] Participants: ${this.participants.length > 0 ? this.participants.join(', ') : 'none'}`)
       const characterPath = this.getCharacterPathForPlayer(playerId)
-      const characterName = characterPath.includes('Casual_2') ? 'Casual_2' : 'Casual_Hoodie'
-      console.log(`[CityEntities] Loading ${characterName} model for remote player ${playerId} from path: ${characterPath}`)
       // loadAvatarModel returns a proper SkeletonUtils clone with animations
       const { model: group, animations } = await this.loadAvatarModel(characterPath)
-      console.log(`[CityEntities] Model loaded successfully for ${playerId} with ${animations.length} animations`)
 
-      // Set initial position - log the position to debug
+      // Set initial position
       const pos = initialPresence.position
-      console.log(`[CityEntities] Setting initial position for ${playerId}: (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`)
       group.position.set(pos.x, pos.y, pos.z)
       group.rotation.y = initialPresence.rotation
 
@@ -390,19 +338,16 @@ export class CityEntities {
         if (walkAnim) {
           walkAction = mixer.clipAction(walkAnim)
           walkAction.setLoop(THREE.LoopRepeat, Infinity)
-          console.log(`[CityEntities] Walk animation set up: ${walkAnim.name}`)
         }
         
         if (runAnim) {
           runAction = mixer.clipAction(runAnim)
           runAction.setLoop(THREE.LoopRepeat, Infinity)
-          console.log(`[CityEntities] Run animation set up: ${runAnim.name}`)
         }
         
         if (idleAnim) {
           idleAction = mixer.clipAction(idleAnim)
           idleAction.setLoop(THREE.LoopRepeat, Infinity)
-          console.log(`[CityEntities] Idle animation set up: ${idleAnim.name}`)
         }
         
         // Start with the appropriate animation based on initial state
@@ -414,10 +359,6 @@ export class CityEntities {
         } else if (idleAction) {
           idleAction.play()
         }
-        
-        console.log(`[CityEntities] Started with ${initialState} animation for ${playerId.slice(-8)}`)
-      } else {
-        console.log(`[CityEntities] No animations found for ${playerId.slice(-8)}`)
       }
 
       // Initialize interpolation buffer with initial snapshot
@@ -468,52 +409,13 @@ export class CityEntities {
       this.avatars.set(playerId, avatar)
       this.scene.add(group)
 
-      // DIAGNOSTIC: Verify avatar was added to scene
+      // Verify avatar was added to scene
       const isInScene = this.scene.children.includes(group)
-      const sceneChildrenCount = this.scene.children.length
-      
-      // Log world position of the avatar
-      const worldPos = new THREE.Vector3()
-      group.getWorldPosition(worldPos)
-      
-      // Count meshes and check materials
-      let meshCount = 0
-      let hasValidMaterial = false
-      group.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          meshCount++
-          if (child.material) {
-            hasValidMaterial = true
-          }
-        }
-      })
-      
-      console.log(`%c[CityEntities] ✅ SPAWNED avatar for ${playerId.slice(-8)}:`, 'background: #4caf50; color: white; font-weight: bold; font-size: 14px;')
-      console.log(`[CityEntities]   - Character: ${characterName}`)
-      console.log(`[CityEntities]   - Local position: (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`)
-      console.log(`[CityEntities]   - World position: (${worldPos.x.toFixed(2)}, ${worldPos.y.toFixed(2)}, ${worldPos.z.toFixed(2)})`)
-      console.log(`[CityEntities]   - Group visible: ${group.visible}`)
-      console.log(`[CityEntities]   - In scene: ${isInScene}`)
-      console.log(`[CityEntities]   - Scene children count: ${sceneChildrenCount}`)
-      console.log(`[CityEntities]   - Group scale: (${group.scale.x.toFixed(2)}, ${group.scale.y.toFixed(2)}, ${group.scale.z.toFixed(2)})`)
-      console.log(`[CityEntities]   - Mesh count: ${meshCount}`)
-      console.log(`[CityEntities]   - Has valid materials: ${hasValidMaterial}`)
-      console.log(`[CityEntities]   - Scene uuid: ${this.scene.uuid}`)
-      
-      // Double-check: verify the avatar is actually in the scene
       if (!isInScene) {
-        console.error(`[CityEntities] ❌ WARNING: Avatar ${playerId.slice(-8)} was NOT added to scene! Attempting retry...`)
         this.scene.add(group)
-        const isInSceneAfterRetry = this.scene.children.includes(group)
-        console.log(`[CityEntities] After retry, avatar ${playerId.slice(-8)} in scene: ${isInSceneAfterRetry}`)
       }
     } catch (error) {
       console.error(`[CityEntities] Error spawning avatar for ${playerId}:`, error)
-      if (error instanceof Error) {
-        console.error(`[CityEntities] Error message: ${error.message}`)
-        console.error(`[CityEntities] Error stack: ${error.stack}`)
-      }
-      // Re-throw so the promise rejection is handled by CityScene
       throw error
     } finally {
       // Always remove from spawning set, whether spawn succeeded or failed
@@ -533,20 +435,14 @@ export class CityEntities {
         // Already spawning, skip
         return
       }
-      console.log(`[CityEntities] Avatar for ${playerId} doesn't exist, spawning...`)
-      this.spawn(playerId, presence)
-        .then(() => {
-          console.log(`[CityEntities] Successfully spawned avatar for ${playerId} via update()`)
-        })
-        .catch((error) => {
-          console.error(`[CityEntities] Failed to spawn avatar for ${playerId} via update():`, error)
-        })
+      this.spawn(playerId, presence).catch((error) => {
+        console.error(`[CityEntities] Failed to spawn avatar for ${playerId}:`, error)
+      })
       return
     }
 
     // Ensure avatar is visible (in case it was hidden)
     if (!avatar.group.visible) {
-      console.log(`[CityEntities] Avatar ${playerId} was hidden, making visible`)
       avatar.group.visible = true
       avatar.group.traverse((child) => {
         child.visible = true
@@ -555,7 +451,6 @@ export class CityEntities {
 
     // Ensure avatar is in scene (in case it was removed)
     if (!this.scene.children.includes(avatar.group)) {
-      console.log(`[CityEntities] Avatar ${playerId} was not in scene, adding it`)
       this.scene.add(avatar.group)
     }
 
@@ -572,7 +467,6 @@ export class CityEntities {
     if (lastSnapshot) {
       const positionDelta = lastSnapshot.position.distanceTo(newSnapshot.position)
       if (positionDelta > 10) {
-        console.log(`[CityEntities] Large position change detected for ${playerId} (${positionDelta.toFixed(2)} units), clearing buffer and snapping`)
         // Clear buffer and snap to new position
         avatar.snapshotBuffer = [newSnapshot]
         avatar.renderedPosition.copy(newSnapshot.position)
@@ -620,11 +514,6 @@ export class CityEntities {
     }
 
     avatar.lastUpdateTime = Date.now()
-
-    // Log position updates occasionally for debugging (every 30 updates ~2 seconds at 15Hz)
-    if (Math.random() < 0.033) {
-      console.log(`[CityEntities] Buffered snapshot for ${playerId}: (${newPos.x.toFixed(2)}, ${newPos.y.toFixed(2)}, ${newPos.z.toFixed(2)}), buffer size: ${avatar.snapshotBuffer.length}`)
-    }
   }
 
   /**
@@ -690,7 +579,6 @@ export class CityEntities {
     })
 
     this.avatars.delete(playerId)
-    console.log(`[CityEntities] Despawned avatar for player ${playerId}`)
   }
 
   // Diagnostic counter for periodic logging
@@ -710,16 +598,7 @@ export class CityEntities {
       return
     }
 
-    // DIAGNOSTIC: Log avatar count every 30 frames (~0.5 second at 60fps) for better visibility
     this.updateCounter++
-    if (this.updateCounter % 30 === 0 && this.avatars.size > 0) {
-      console.log(`%c[CityEntities] updateAll: ${this.avatars.size} avatar(s), spawning: ${this.spawningPlayers.size}`, 'background: #673ab7; color: white;')
-      for (const [playerId, avatar] of this.avatars.entries()) {
-        const scale = avatar.group.scale
-        const hasAnims = !!(avatar.walkAction || avatar.runAction || avatar.idleAction)
-        console.log(`[CityEntities]   - ${playerId.slice(-8)}: pos=(${avatar.group.position.x.toFixed(2)}, ${avatar.group.position.y.toFixed(2)}, ${avatar.group.position.z.toFixed(2)}), anim=${avatar.currentAnimationState}, hasAnims=${hasAnims}, visible=${avatar.group.visible}`)
-      }
-    }
 
     // Calculate render time: current estimated server time minus interpolation delay
     const estimatedServerTime = Date.now() + this.serverTimeOffset
@@ -734,7 +613,6 @@ export class CityEntities {
         })
       }
       if (!this.scene.children.includes(avatar.group)) {
-        console.log(`[CityEntities] Avatar ${playerId} was not in scene during update, re-adding`)
         this.scene.add(avatar.group)
       }
 
@@ -854,8 +732,6 @@ export class CityEntities {
    * Called when entering city scene to ensure avatars are at their latest positions.
    */
   forceRefreshAllAvatars(): void {
-    console.log(`%c[CityEntities] 🔄 Force refreshing ${this.avatars.size} avatar(s)`, 'background: #ff9800; color: black; font-weight: bold; font-size: 14px;')
-    
     for (const [playerId, avatar] of this.avatars.entries()) {
       // Ensure avatar is visible
       avatar.group.visible = true
@@ -869,7 +745,6 @@ export class CityEntities {
 
       // Ensure avatar is in scene
       if (!this.scene.children.includes(avatar.group)) {
-        console.log(`[CityEntities] Re-adding avatar ${playerId.slice(-8)} to scene`)
         this.scene.add(avatar.group)
       }
 
@@ -880,9 +755,6 @@ export class CityEntities {
         avatar.renderedRotation = latestSnapshot.rotation
         avatar.group.position.copy(latestSnapshot.position)
         avatar.group.rotation.y = latestSnapshot.rotation
-        console.log(`[CityEntities] 📍 Force positioned avatar ${playerId.slice(-8)} at (${latestSnapshot.position.x.toFixed(2)}, ${latestSnapshot.position.y.toFixed(2)}, ${latestSnapshot.position.z.toFixed(2)}), visible=${avatar.group.visible}, inScene=${this.scene.children.includes(avatar.group)}`)
-      } else {
-        console.warn(`[CityEntities] ⚠️ Avatar ${playerId.slice(-8)} has empty snapshot buffer!`)
       }
     }
   }

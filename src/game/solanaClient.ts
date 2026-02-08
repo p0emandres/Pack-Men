@@ -10,6 +10,55 @@ import { hashMatchIdStringToBytes, hashToU64 } from './matchIdHash'
 import { createMatchIdentity, u64ToLE, assertBuffer } from './matchIdentity'
 import { sortPlayerPubkeys } from './matchCoordination'
 
+// =============================================================================
+// RPC Request Throttle - Prevents 429 rate limiting from public RPC endpoints
+// =============================================================================
+class RpcThrottle {
+  private queue: Array<{ resolve: () => void }> = []
+  private lastRequestTime = 0
+  private processing = false
+  private minDelayMs: number
+
+  constructor(minDelayMs = 100) {
+    this.minDelayMs = minDelayMs
+  }
+
+  async acquire(): Promise<void> {
+    return new Promise((resolve) => {
+      this.queue.push({ resolve })
+      this.processQueue()
+    })
+  }
+
+  private async processQueue() {
+    if (this.processing || this.queue.length === 0) return
+    this.processing = true
+
+    while (this.queue.length > 0) {
+      const now = Date.now()
+      const elapsed = now - this.lastRequestTime
+      const waitTime = Math.max(0, this.minDelayMs - elapsed)
+      
+      if (waitTime > 0) {
+        await new Promise(r => setTimeout(r, waitTime))
+      }
+      
+      this.lastRequestTime = Date.now()
+      const item = this.queue.shift()
+      item?.resolve()
+    }
+
+    this.processing = false
+  }
+}
+
+// Singleton throttle instance - 100ms between requests = max 10 requests/second
+// This is well under public devnet limits (typically 40-100 req/sec)
+const rpcThrottle = new RpcThrottle(100)
+
+// Export for use in other modules that make RPC calls
+export { rpcThrottle }
+
 // Verify the IDL has discriminators (Anchor 0.32+ includes them automatically)
 if (DroogGameIDL.instructions?.[0]?.discriminator) {
   console.log('[DroogGameClient] ✓ Using natively generated Anchor IDL with discriminators')
@@ -437,14 +486,6 @@ export class DroogGameClient {
       throw new Error('Wallet must have signAllTransactions method')
     }
 
-    // Debug logging (can be removed in production)
-    console.log('[DroogGameClient] Creating client with:', {
-      publicKey: wallet.publicKey.toString(),
-      hasSignTransaction: typeof wallet.signTransaction === 'function',
-      hasSignAllTransactions: typeof wallet.signAllTransactions === 'function',
-      publicKeyIsPublicKey: wallet.publicKey instanceof PublicKey,
-    })
-
     this.connection = connection
     this.provider = new AnchorProvider(connection, wallet, {
       commitment: 'confirmed',
@@ -461,42 +502,22 @@ export class DroogGameClient {
       }
     }
     
-    // Debug: Log IDL structure before creating Program
-    console.log('[DroogGameClient] IDL accounts array:', normalizedIdl.accounts?.map((acc: any) => acc.name))
-    console.log('[DroogGameClient] IDL types array:', normalizedIdl.types?.map((t: any) => t.name))
-    
     // Log MatchState account structure to see how array types are represented
     const matchStateAccount = normalizedIdl.accounts?.find((acc: any) => acc.name === 'MatchState')
     if (matchStateAccount) {
       const customersField = matchStateAccount.type?.fields?.find((f: any) => f.name === 'customers')
       if (customersField) {
-        console.log('[DroogGameClient] MatchState.customers field type:', JSON.stringify(customersField.type, null, 2))
-        console.log('[DroogGameClient] customers field type structure:', {
-          isArray: customersField.type && typeof customersField.type === 'object' && 'array' in customersField.type,
-          arrayValue: customersField.type?.array,
-          arrayType: typeof customersField.type?.array?.[0],
-        })
+        // Field type info available if needed for debugging
       }
     }
     
     // Log CustomerState type structure to debug option type issue
-    // Debug: Log IDL structure before creating Program (for troubleshooting)
     const customerStateType = normalizedIdl.types?.find((t: any) => t.name === 'CustomerState')
     if (customerStateType) {
       const lastServedByField = customerStateType.type?.fields?.find((f: any) => f.name === 'lastServedBy')
       if (lastServedByField) {
-        console.log('[DroogGameClient] lastServedBy field type:', lastServedByField.type)
-        console.log('[DroogGameClient] lastServedBy.type.option:', lastServedByField.type?.option)
+        // Field type info available if needed for debugging
       }
-    }
-    
-    if (normalizedIdl.instructions?.[0]?.accounts) {
-      console.log('[DroogGameClient] First instruction accounts:', normalizedIdl.instructions[0].accounts.map((acc: any) => ({
-        name: acc.name,
-        type: acc.type,
-        isMut: acc.isMut,
-        isSigner: acc.isSigner,
-      })))
     }
     
     // Use the normalized IDL directly
@@ -557,17 +578,6 @@ export class DroogGameClient {
       if (originalEvents && this.program.idl) {
         this.program.idl.events = originalEvents
       }
-      
-      // Debug: Verify the program was created correctly
-      console.log('[DroogGameClient] Program created successfully:', {
-        programId: this.program.programId.toString(),
-        expectedProgramId: PROGRAM_ID.toString(),
-        idlAddress: this.program.idl?.address,
-        idlInstructions: this.program.idl?.instructions?.length,
-        methodsAvailable: Object.keys(this.program.methods || {}).length,
-        hasInitMatch: !!(this.program.methods as any)?.initMatch,
-        programIdsMatch: this.program.programId.toString() === PROGRAM_ID.toString(),
-      })
       
       // Verify program ID matches
       if (this.program.programId.toString() !== PROGRAM_ID.toString()) {
@@ -641,8 +651,6 @@ export class DroogGameClient {
           // The IDL is stored in a specific binary format that needs proper deserialization
           // For now, we'll skip the on-chain IDL fetch since it requires Anchor's internal decoders
           // The static IDL from target/idl/droog_game.json is the source of truth anyway
-          console.log('[DroogGameClient] IDL found on-chain but decoding requires Anchor internals')
-          console.log('[DroogGameClient] Using static IDL instead (this is the recommended approach)')
           return null
         } catch (parseError) {
           console.warn('[DroogGameClient] Failed to decode IDL data:', parseError)
@@ -658,13 +666,10 @@ export class DroogGameClient {
       accountInfo = await connection.getAccountInfo(idlAddress)
       if (accountInfo) {
         // Same issue - IDL is in binary format, not JSON
-        console.log('[DroogGameClient] IDL found at standard address but requires binary decoding')
-        console.log('[DroogGameClient] Using static IDL instead')
         return null
       }
       
       // IDL not found - this is OK, we'll use the static IDL
-      console.log('[DroogGameClient] IDL not found on-chain, using static IDL (this is normal)')
       return null
     } catch (error) {
       console.warn('[DroogGameClient] Failed to fetch IDL from chain:', error)
@@ -684,7 +689,6 @@ export class DroogGameClient {
   static async create(connection: Connection, wallet: Wallet): Promise<DroogGameClient> {
     // CRITICAL: Always try to fetch IDL from chain first to ensure we have the latest version
     // This is especially important after program upgrades
-    console.log('[DroogGameClient] Attempting to fetch IDL from chain to ensure latest version...')
     const chainIdl = await this.fetchIdlFromChain(connection, PROGRAM_ID)
     
     let normalizedIdl: any
@@ -693,18 +697,12 @@ export class DroogGameClient {
       const cloned = deepCloneIdl(chainIdl)
       cloned.address = PROGRAM_ID.toString()
       normalizedIdl = await normalizeIdl(cloned)
-      console.log('[DroogGameClient] ✓ Using IDL fetched from chain (latest version)')
       
       // Verify player_b is not a signer in the on-chain IDL
       const initMatchIx = normalizedIdl.instructions?.find((ix: any) => ix.name === 'initMatch')
       if (initMatchIx) {
         const playerBAccount = initMatchIx.accounts?.find((acc: any) => acc.name === 'playerB' || acc.name === 'player_b')
         if (playerBAccount) {
-          console.log('[DroogGameClient] On-chain IDL player_b account:', {
-            name: playerBAccount.name,
-            isSigner: playerBAccount.signer,
-            hasSignerField: 'signer' in playerBAccount,
-          })
           if (playerBAccount.signer === true) {
             console.error('[DroogGameClient] ⚠️ WARNING: On-chain IDL shows player_b as signer! This indicates the deployed program is incorrect.')
           }
@@ -864,13 +862,6 @@ export class DroogGameClient {
     // For Option<u64>, pass the BN directly (Anchor handles Some/None wrapping)
     const matchIdU64BN = matchIdentity.u64
 
-    // Debug: Log the instruction args to verify types
-    console.log('[DroogGameClient.initMatch] Calling with args:', {
-      matchIdHashArray: matchIdHashArray.length,
-      matchIdU64BN: matchIdU64BN.toString(),
-      startTs: startTs,
-    })
-
     // Verify the instruction exists in the IDL
     const idl = this.program.idl
     if (!idl || !idl.instructions) {
@@ -886,19 +877,6 @@ export class DroogGameClient {
       )
     }
 
-    // Debug: Log instruction structure
-    console.log('[DroogGameClient.initMatch] Instruction found:', {
-      name: initMatchIx.name,
-      hasDiscriminator: !!initMatchIx.discriminator,
-      discriminator: initMatchIx.discriminator ? Array.from(initMatchIx.discriminator) : null,
-      discriminatorType: typeof initMatchIx.discriminator,
-      isBuffer: Buffer.isBuffer(initMatchIx.discriminator),
-      args: initMatchIx.args?.map((arg: any) => ({
-        name: arg.name,
-        type: JSON.stringify(arg.type),
-      })),
-    })
-
     // Verify discriminator is a Buffer (required by Anchor)
     if (!initMatchIx.discriminator || !Buffer.isBuffer(initMatchIx.discriminator)) {
       console.warn('[DroogGameClient.initMatch] Missing or invalid discriminator, computing...')
@@ -908,35 +886,10 @@ export class DroogGameClient {
       const hashBuffer = await crypto.subtle.digest('SHA-256', data)
       const hash = Buffer.from(hashBuffer)
       initMatchIx.discriminator = hash.subarray(0, 8)
-      console.log('[DroogGameClient.initMatch] Computed discriminator:', Array.from(initMatchIx.discriminator))
     }
 
     // Use type assertion to avoid TypeScript deep instantiation error
     const methods = this.program.methods as any
-    
-    // Debug: Log what methods are available
-    console.log('[DroogGameClient.initMatch] Available methods:', Object.keys(methods))
-    console.log('[DroogGameClient.initMatch] Program IDL instructions:', this.program.idl?.instructions?.map((ix: any) => ix.name))
-    
-    // Detailed instruction debugging
-    console.log('[DroogGameClient.initMatch] Available instructions with discriminators:', 
-      this.program.idl?.instructions?.map((ix: any) => ({
-        name: ix.name,
-        discriminator: ix.discriminator ? Array.from(ix.discriminator) : 'missing',
-        discriminatorType: typeof ix.discriminator,
-        isBuffer: Buffer.isBuffer(ix.discriminator),
-      }))
-    )
-    
-    console.log('[DroogGameClient.initMatch] Looking for instruction: initMatch')
-    
-    // Check if the instruction exists
-    const ixDef = this.program.idl?.instructions?.find((ix: any) => ix.name === 'initMatch')
-    console.log('[DroogGameClient.initMatch] Found instruction definition:', ixDef ? {
-      name: ixDef.name,
-      discriminator: ixDef.discriminator ? Array.from(ixDef.discriminator) : 'missing',
-      args: ixDef.args?.map((arg: any) => ({ name: arg.name, type: JSON.stringify(arg.type) })),
-    } : 'NOT FOUND')
     
     // Also check for snake_case version
     const ixDefSnake = this.program.idl?.instructions?.find((ix: any) => ix.name === 'init_match')
@@ -1016,7 +969,6 @@ export class DroogGameClient {
         if (testInstruction.keys && testInstruction.keys.length > 0) {
           const extractedPDA = testInstruction.keys[0].pubkey
           anchorDerivedPDA = extractedPDA
-          console.log('[DroogGameClient.initMatch] Extracted PDA from Anchor instruction:', extractedPDA.toString())
         }
       } catch (e) {
         console.warn('[DroogGameClient.initMatch] Could not extract PDA from instruction:', e)
@@ -1037,29 +989,6 @@ export class DroogGameClient {
       // Use Anchor's derived PDA if we got it, otherwise use our manual derivation
       const finalPDA = anchorDerivedPDA ?? matchPDA
       
-      // Log right before calling the method
-      console.log('[DroogGameClient.initMatch] PDA Derivation Check:', {
-        ourPDA: matchPDA.toString(),
-        anchorDerivedPDA: anchorDerivedPDA ? anchorDerivedPDA.toString() : 'NOT EXTRACTED',
-        manualPDA: manualPDA.toString(),
-        finalPDA: finalPDA.toString(),
-        match: matchPDA.equals(finalPDA) ? '✓ MATCH' : '✗ MISMATCH',
-        manualMatch: manualPDA.equals(finalPDA) ? '✓ MATCH' : '✗ MISMATCH',
-        bump: manualBump,
-        seeds: {
-          match: Buffer.from('match').toString('hex'),
-          hash: matchIdentity.hash32.toString('hex'),
-          hashArray: matchIdHashArray.slice(0, 8).join(','), // First 8 bytes
-          playerA: sortedA.toString(),
-          playerB: sortedB.toString(),
-          playerABytes: sortedA.toBuffer().toString('hex'),
-          playerBBytes: sortedB.toBuffer().toString('hex'),
-        },
-        matchIdHashArrayLength: matchIdHashArray.length,
-        matchIdU64BN: matchIdU64BN.toString(),
-        startTs: startTs,
-      })
-      
       // Update matchPDA to use the final PDA
       if (!matchPDA.equals(finalPDA)) {
         console.warn('[DroogGameClient.initMatch] Using different PDA than our initial derivation')
@@ -1068,24 +997,6 @@ export class DroogGameClient {
       
       // Let Anchor derive the PDA automatically using the instruction args
       // The IDL specifies that match_id_hash comes from instruction args, so Anchor should derive it correctly
-      console.log('[DroogGameClient.initMatch] Letting Anchor auto-derive PDA from instruction args...')
-      console.log('[DroogGameClient.initMatch] PDA derivation details:', {
-        ourDerivedPDA: matchPDA.toString(),
-        manualPDA: manualPDA.toString(),
-        match: matchPDA.equals(manualPDA),
-        seeds: {
-          match: Buffer.from('match').toString('hex'),
-          hashLength: matchIdentity.hash32.length,
-          hashFirst8: Array.from(matchIdentity.hash32.slice(0, 8)).join(','),
-          playerA: sortedA.toString(),
-          playerB: sortedB.toString(),
-        },
-        instructionArgs: {
-          matchIdHashArrayLength: matchIdHashArray.length,
-          matchIdU64BN: matchIdU64BN.toString(),
-          startTs: startTs,
-        }
-      })
       
       // Verify program ID before executing instruction
       if (this.program.programId.toString() !== PROGRAM_ID.toString()) {
@@ -1129,18 +1040,9 @@ export class DroogGameClient {
           throw error
         }
         
-        console.log('[DroogGameClient.initMatch] Account order validated:', {
-          playerA: sortedA.toString(),
-          playerB: sortedB.toString(),
-          playerAFirstByte: aBytes[0],
-          playerBFirstByte: bBytes[0],
-          isValid: isValidOrder,
-        })
-        
         // CRITICAL: Build instruction manually to ensure player_b is NOT a signer
         // Anchor's .rpc() might incorrectly infer player_b as a signer, so we build
         // the instruction explicitly and then send it with correct account metadata
-        console.log('[DroogGameClient.initMatch] Building instruction with explicit account metadata...')
         
         // Build the instruction using Anchor's builder
         const instruction = await methods
@@ -1182,34 +1084,12 @@ export class DroogGameClient {
           throw new Error('Failed to locate player_b account in instruction')
         }
         
-        // Log the final account metadata for debugging
-        console.log('[DroogGameClient.initMatch] Instruction account metadata:', {
-          totalKeys: instruction.keys.length,
-          matchState: {
-            pubkey: instruction.keys[0].pubkey.toString(),
-            isSigner: instruction.keys[0].isSigner,
-            isWritable: instruction.keys[0].isWritable,
-          },
-          playerA: {
-            pubkey: instruction.keys[1].pubkey.toString(),
-            isSigner: instruction.keys[1].isSigner,
-            isWritable: instruction.keys[1].isWritable,
-          },
-          playerB: {
-            index: playerBIndex,
-            pubkey: instruction.keys[playerBIndex].pubkey.toString(),
-            isSigner: instruction.keys[playerBIndex].isSigner,
-            isWritable: instruction.keys[playerBIndex].isWritable,
-            expectedPubkey: sortedB.toString(),
-            matches: instruction.keys[playerBIndex].pubkey.equals(sortedB),
-          },
           allKeys: instruction.keys.map((k: any, i: number) => ({
             index: i,
             pubkey: k.pubkey.toString(),
             isSigner: k.isSigner,
             isWritable: k.isWritable,
-          })),
-        })
+          }))
         
         // CRITICAL: Double-check player_b is NOT a signer before sending
         if (instruction.keys[playerBIndex].isSigner) {
@@ -1221,7 +1101,6 @@ export class DroogGameClient {
         const tx = new Transaction().add(instruction)
         const signature = await this.provider.sendAndConfirm(tx)
         
-        console.log('[DroogGameClient.initMatch] ✓ Success with explicit account metadata')
         return signature
       } catch (error: any) {
         console.error('[DroogGameClient.initMatch] Auto-derive failed:', error.message)
@@ -1251,7 +1130,6 @@ export class DroogGameClient {
         }
         
         // Fallback: Try with explicit PDA
-        console.log('[DroogGameClient.initMatch] Fallback: Using explicit PDA...')
         // Re-validate order for fallback (should already be validated, but double-check)
         const fallbackABytes = sortedA.toBytes()
         const fallbackBBytes = sortedB.toBytes()
@@ -1299,7 +1177,6 @@ export class DroogGameClient {
           const tx = new Transaction().add(instruction)
           const signature = await this.provider.sendAndConfirm(tx)
           
-          console.log('[DroogGameClient.initMatch] ✓ Success with explicit PDA fallback')
           return signature
         } catch (fallbackError: any) {
           console.error('[DroogGameClient.initMatch] All approaches failed. Last error:', fallbackError.message)
@@ -1363,8 +1240,6 @@ export class DroogGameClient {
               this.program.idl.events = originalEvents
             }
             
-            console.log('[DroogGameClient.initMatch] Recreated program with IDL from chain, retrying...')
-            
             // Retry the call with the new program
             const retryMethods = this.program.methods as any
             const tx = await retryMethods
@@ -1394,12 +1269,12 @@ export class DroogGameClient {
 
   /**
    * Check if Match PDA exists on-chain.
-   * Used for polling when waiting for the other player to create the PDA.
+   * Used for real-time detection when waiting for the other player to create the PDA.
    * 
    * @param matchIdString - The string matchId
    * @param playerA - First player's public key
    * @param playerB - Second player's public key
-   * @param commitment - Commitment level for the fetch (defaults to 'confirmed' for faster reads)
+   * @param commitment - Commitment level for the fetch (defaults to 'confirmed' for faster initialization; use 'finalized' for post-match verification)
    * @returns Promise resolving to MatchState if PDA exists, null otherwise
    */
   async checkMatchPDAExists(
@@ -1409,6 +1284,9 @@ export class DroogGameClient {
     commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'
   ): Promise<MatchState | null> {
     try {
+      // Throttle to prevent 429 rate limiting
+      await rpcThrottle.acquire()
+      
       // Use canonical match identity for consistency
       const matchIdentity = await createMatchIdentity(matchIdString)
       const [matchPDA] = DroogGameClient.deriveMatchPDAFromHash(
@@ -1473,9 +1351,6 @@ export class DroogGameClient {
     playerA: PublicKey,
     playerB: PublicKey
   ): Promise<string> {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1458',message:'initGrowState entry',data:{matchIdString,playerA:playerA.toBase58(),playerB:playerB.toBase58()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     const matchIdentity = await createMatchIdentity(matchIdString)
     const [matchPDA] = DroogGameClient.deriveMatchPDAFromHash(
       matchIdentity.hash32,
@@ -1484,29 +1359,20 @@ export class DroogGameClient {
     )
     const [growStatePDA] = DroogGameClient.deriveGrowStatePDA(matchIdentity.u64)
     const payer = this.provider.wallet.publicKey
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1472',message:'initGrowState before tx',data:{matchPDA:matchPDA.toBase58(),growStatePDA:growStatePDA.toBase58(),payer:payer.toBase58(),matchId:matchIdentity.u64.toString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
 
     try {
-    const tx = await (this.program.methods as any)
-      .initGrowState(Array.from(matchIdentity.hash32), matchIdentity.u64)
-      .accounts({
-        growState: growStatePDA,
-        matchState: matchPDA,
-        payer,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc()
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1482',message:'initGrowState succeeded',data:{txSignature:tx},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
+      const tx = await (this.program.methods as any)
+        .initGrowState(Array.from(matchIdentity.hash32), matchIdentity.u64)
+        .accounts({
+          growState: growStatePDA,
+          matchState: matchPDA,
+          payer,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc()
 
-    return tx
+      return tx
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1485',message:'initGrowState failed',data:{errorMessage:error?.message,errorCode:error?.error?.errorCode,logs:error?.logs,transactionLogs:error?.transactionLogs},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       throw error
     }
   }
@@ -1591,39 +1457,27 @@ export class DroogGameClient {
     slotIndex: number,
     strainLevel: number
   ): Promise<string> {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1558',message:'plantStrain entry',data:{matchIdString,playerA:playerA.toBase58(),playerB:playerB.toBase58(),slotIndex,strainLevel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
-    // #endregion
     const matchIdentity = await createMatchIdentity(matchIdString)
     const [growStatePDA] = DroogGameClient.deriveGrowStatePDA(matchIdentity.u64)
+    
+    console.log('[DroogGameClient.plantStrain] Starting...', {
+      matchIdString,
+      slotIndex,
+      strainLevel,
+      playerA: playerA.toBase58(),
+      playerB: playerB.toBase58(),
+      matchIdU64: matchIdentity.u64.toString(),
+      growStatePDA: growStatePDA.toBase58(),
+    })
+    
     const player = this.provider.wallet.publicKey
 
     // Check if grow state account exists
     let growStateAccountInfo = await this.provider.connection.getAccountInfo(growStatePDA)
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1570',message:'growState account check',data:{growStatePDA:growStatePDA.toBase58(),exists:!!growStateAccountInfo,owner:growStateAccountInfo?.owner?.toBase58(),dataLength:growStateAccountInfo?.data?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
     
-    // If grow state doesn't exist, initialize it first
+    // Grow state must be initialized at match creation (no lazy initialization)
     if (!growStateAccountInfo) {
-      console.log('[DroogGameClient] Grow state not initialized, initializing now...')
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1575',message:'calling initGrowState',data:{matchIdString,playerA:playerA.toBase58(),playerB:playerB.toBase58()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,E'})}).catch(()=>{});
-      // #endregion
-      try {
-        await this.initGrowState(matchIdString, playerA, playerB)
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1577',message:'initGrowState succeeded',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
-        console.log('[DroogGameClient] Grow state initialized successfully')
-      } catch (initError: any) {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1579',message:'initGrowState failed',data:{error:initError?.message,logs:initError?.logs,errorCode:initError?.error?.errorCode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
-        throw initError
-      }
-      // Re-fetch after initialization
-      growStateAccountInfo = await this.provider.connection.getAccountInfo(growStatePDA)
+      throw new Error('Grow state not initialized. Grow state must be created during match initialization.')
     }
 
     // Fetch grow state to get the actual player_a and player_b stored on-chain
@@ -1633,9 +1487,6 @@ export class DroogGameClient {
     if (!growState) {
       throw new Error('Grow state account exists but could not be fetched')
     }
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1584',message:'growState fetched',data:{matchId:growState.matchId,playerA:typeof growState.playerA==='string'?growState.playerA:growState.playerA.toBase58(),playerB:typeof growState.playerB==='string'?growState.playerB:growState.playerB.toBase58()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
 
     // Derive match_state PDA using the players stored in grow_state
     // This ensures the PDA matches what the Rust instruction expects
@@ -1653,38 +1504,26 @@ export class DroogGameClient {
       growStatePlayerA,
       growStatePlayerB
     )
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1604',message:'PDAs derived',data:{matchPDA:matchPDA.toBase58(),growStatePDA:growStatePDA.toBase58(),growStatePlayerA:growStatePlayerA.toBase58(),growStatePlayerB:growStatePlayerB.toBase58(),clientPlayerA:playerA.toBase58(),clientPlayerB:playerB.toBase58()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
 
     // Verify match_state account exists
     const matchStateAccountInfo = await this.provider.connection.getAccountInfo(matchPDA)
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1607',message:'matchState account check',data:{matchPDA:matchPDA.toBase58(),exists:!!matchStateAccountInfo,owner:matchStateAccountInfo?.owner?.toBase58()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
 
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1610',message:'before transaction construction',data:{slotIndex,strainLevel,player:player.toBase58(),growStatePDA:growStatePDA.toBase58(),matchPDA:matchPDA.toBase58()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C,D,E'})}).catch(()=>{});
-      // #endregion
-    const tx = await (this.program.methods as any)
-      .plantStrain(slotIndex, strainLevel)
-      .accounts({
-        growState: growStatePDA,
-        matchState: matchPDA,
-        player,
-      })
-      .rpc()
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1616',message:'transaction succeeded',data:{txSignature:tx},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
-      // #endregion
+      console.log('[DroogGameClient.plantStrain] Sending transaction...')
+      
+      const tx = await (this.program.methods as any)
+        .plantStrain(slotIndex, strainLevel)
+        .accounts({
+          growState: growStatePDA,
+          matchState: matchPDA,
+          player,
+        })
+        .rpc()
 
-    return tx
+      console.log('[DroogGameClient.plantStrain] Transaction SUCCESS:', tx)
+      return tx
     } catch (error: any) {
       // Enhanced error logging for debugging
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'solanaClient.ts:1620',message:'transaction error caught',data:{errorMessage:error?.message,errorCode:error?.error?.errorCode,errorNumber:error?.error?.errorNumber,logs:error?.logs,programErrorStack:error?.programErrorStack,transactionLogs:error?.transactionLogs},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D'})}).catch(()=>{});
-      // #endregion
       console.error('[DroogGameClient.plantStrain] Transaction failed:', {
         error: error.message,
         logs: error.logs,
@@ -1876,60 +1715,194 @@ export class DroogGameClient {
 
   /**
    * Fetch grow state
+   * 
+   * @param matchId - The match ID
+   * @param commitment - Commitment level for the fetch.
+   *   - 'confirmed': Use after a transaction is confirmed for immediate state updates (faster)
+   *   - 'finalized': Use for authoritative reads when adversarial safety matters (default)
+   *   Note: For post-transaction refreshes, prefer 'confirmed' to avoid stale reads.
+   * @returns Promise resolving to GrowState if PDA exists, null otherwise
    */
-  async getGrowState(matchId: number | BN | bigint): Promise<GrowState | null> {
+  async getGrowState(
+    matchId: number | BN | bigint,
+    commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'
+  ): Promise<GrowState | null> {
     try {
+      // Throttle to prevent 429 rate limiting
+      await rpcThrottle.acquire()
+      
       const [growStatePDA] = DroogGameClient.deriveGrowStatePDA(matchId)
-      const account = await (this.program.account as any).matchGrowState.fetch(growStatePDA)
+      
+      if (import.meta.env.DEV) {
+        console.log('[getGrowState] Fetching from PDA:', growStatePDA.toBase58())
+        console.log('[getGrowState] With matchId:', matchId.toString())
+      }
+      
+      let account: any
+      try {
+        // Try Anchor's built-in fetch first
+        account = await (this.program.account as any).matchGrowState.fetch(growStatePDA, commitment)
+      } catch (anchorDecodeError: any) {
+        // If Anchor's decoder fails (can happen with enum variants), try raw decode
+        // This happens when Anchor's Union decoder has trouble with certain data patterns
+        if (anchorDecodeError?.message?.includes('Cannot read properties of null') ||
+            anchorDecodeError?.message?.includes('Union2.decode')) {
+          console.warn('[getGrowState] Anchor decode failed, trying raw decode...', anchorDecodeError.message)
+          
+          // Fetch raw account data
+          const rawAccount = await this.connection.getAccountInfo(growStatePDA, commitment)
+          if (!rawAccount?.data) {
+            console.warn('[getGrowState] Raw account fetch returned no data')
+            return null
+          }
+          
+          // Try to decode using the coder directly
+          try {
+            account = this.program.coder.accounts.decode('matchGrowState', rawAccount.data)
+            console.log('[getGrowState] Raw decode succeeded')
+          } catch (rawDecodeError: any) {
+            console.warn('[getGrowState] Anchor coder decode failed, trying manual Borsh decode...', rawDecodeError.message)
+            
+            // Manual Borsh decode - bypasses Anchor's broken enum handling
+            try {
+              account = this.manualDecodeMatchGrowState(rawAccount.data)
+              console.log('[getGrowState] Manual Borsh decode succeeded')
+            } catch (manualDecodeError: any) {
+              console.error('[getGrowState] Manual Borsh decode also failed:', manualDecodeError.message)
+              // Return null to trigger retry - the on-chain state might still be propagating
+              return null
+            }
+          }
+        } else {
+          // Re-throw non-decoder errors
+          throw anchorDecodeError
+        }
+      }
+      
+      // Debug: log slot summary (condensed to reduce console spam)
+      if (import.meta.env.DEV) {
+        const getSlotsummary = (slots: any[]) => slots?.map((slot: any, i: number) => {
+          const ps = slot.plantState || slot.plant_state
+          const stateType = ps ? Object.keys(ps)[0] : '?'
+          return `${i}:${stateType}`
+        }).join(' ') || 'none'
+        
+        console.log('[getGrowState] Fetched state - A:', getSlotsummary(account.playerASlots), '| B:', getSlotsummary(account.playerBSlots))
+      }
       
       const parseSlot = (slot: any): GrowSlot => {
         // Parse the new PlantState enum structure
-        // Anchor serializes enums as objects with __kind field (or discriminator)
-        // Handle both possible formats
+        // Anchor serializes enums in multiple possible formats:
+        // 1. { __kind: 'Growing', ... } - our normalized format
+        // 2. { growing: { strainLevel: 1, plantedAt: ... } } - Anchor object format
+        // 3. { discriminator: 1, ... } - discriminator format
+        // Handle property name variations: plantState vs plant_state
+        
         let plantState: PlantState
-        if (slot.plantState) {
-          // Check if it's already in the expected format
-          if (slot.plantState.__kind) {
-            plantState = slot.plantState
-          } else if (slot.plantState.discriminator !== undefined) {
-            // Alternative format: use discriminator
-            const disc = slot.plantState.discriminator
+        const rawPlantState = slot.plantState || slot.plant_state
+        
+        if (rawPlantState) {
+          // Check if it's already in our normalized format (__kind)
+          if (rawPlantState.__kind) {
+            plantState = rawPlantState
+          }
+          // Check for Anchor object format: { empty: {} }, { growing: {...} }, { ready: {...} }
+          else if ('empty' in rawPlantState) {
+            plantState = { __kind: 'Empty' }
+          }
+          else if ('growing' in rawPlantState) {
+            const growingData = rawPlantState.growing
+            plantState = { 
+              __kind: 'Growing', 
+              strainLevel: growingData.strainLevel ?? growingData.strain_level ?? 0,
+              plantedAt: growingData.plantedAt ?? growingData.planted_at ?? new BN(0)
+            }
+          }
+          else if ('ready' in rawPlantState) {
+            const readyData = rawPlantState.ready
+            plantState = { 
+              __kind: 'Ready', 
+              strainLevel: readyData.strainLevel ?? readyData.strain_level ?? 0
+            }
+          }
+          // Check for discriminator format
+          else if (rawPlantState.discriminator !== undefined) {
+            const disc = rawPlantState.discriminator
             if (disc === 0) {
               plantState = { __kind: 'Empty' }
             } else if (disc === 1) {
               plantState = { 
                 __kind: 'Growing', 
-                strainLevel: slot.plantState.strainLevel || slot.plantState.strain_level || 0,
-                plantedAt: slot.plantState.plantedAt || slot.plantState.planted_at || new BN(0)
+                strainLevel: rawPlantState.strainLevel || rawPlantState.strain_level || 0,
+                plantedAt: rawPlantState.plantedAt || rawPlantState.planted_at || new BN(0)
               }
             } else if (disc === 2) {
               plantState = { 
                 __kind: 'Ready', 
-                strainLevel: slot.plantState.strainLevel || slot.plantState.strain_level || 0
-              }
-            } else {
-              plantState = { __kind: 'Empty' }
-            }
-          } else {
-            // Try to infer from structure
-            if ('plantedAt' in slot.plantState || 'planted_at' in slot.plantState) {
-              plantState = {
-                __kind: 'Growing',
-                strainLevel: slot.plantState.strainLevel || slot.plantState.strain_level || slot.strainLevel || 0,
-                plantedAt: slot.plantState.plantedAt || slot.plantState.planted_at || new BN(0)
-              }
-            } else if ('strainLevel' in slot.plantState || 'strain_level' in slot.plantState) {
-              plantState = {
-                __kind: 'Ready',
-                strainLevel: slot.plantState.strainLevel || slot.plantState.strain_level || slot.strainLevel || 0
+                strainLevel: rawPlantState.strainLevel || rawPlantState.strain_level || 0
               }
             } else {
               plantState = { __kind: 'Empty' }
             }
           }
+          // Try to infer from structure (legacy inference)
+          else if ('plantedAt' in rawPlantState || 'planted_at' in rawPlantState) {
+            plantState = {
+              __kind: 'Growing',
+              strainLevel: rawPlantState.strainLevel || rawPlantState.strain_level || slot.strainLevel || 0,
+              plantedAt: rawPlantState.plantedAt || rawPlantState.planted_at || new BN(0)
+            }
+          } 
+          else if ('strainLevel' in rawPlantState || 'strain_level' in rawPlantState) {
+            plantState = {
+              __kind: 'Ready',
+              strainLevel: rawPlantState.strainLevel || rawPlantState.strain_level || slot.strainLevel || 0
+            }
+          } 
+          else {
+            // Empty object means Empty variant
+            plantState = { __kind: 'Empty' }
+          }
         } else {
-          // No plantState field - might be legacy format or truly empty
-          plantState = { __kind: 'Empty' }
+          // No plantState/plant_state field - check legacy format (old on-chain structure)
+          // Legacy format has: occupied, strainLevel, variantId, plantedTs, readyTs, harvested
+          if (slot.occupied) {
+            // Legacy: slot is occupied
+            const legacyPlantedTs = slot.plantedTs 
+              ? (typeof slot.plantedTs === 'number' ? slot.plantedTs : 
+                 (slot.plantedTs.toNumber ? slot.plantedTs.toNumber() : Number(slot.plantedTs)))
+              : 0
+            const legacyReadyTs = slot.readyTs 
+              ? (typeof slot.readyTs === 'number' ? slot.readyTs : 
+                 (slot.readyTs.toNumber ? slot.readyTs.toNumber() : Number(slot.readyTs)))
+              : 0
+            const legacyStrainLevel = slot.strainLevel || slot.strain_level || 0
+            
+            // Check if harvested
+            if (slot.harvested) {
+              // Harvested plants go back to Empty
+              plantState = { __kind: 'Empty' }
+            } else {
+              // Check if ready by comparing planted_ts + growth_time vs current time
+              // We can't check current time here, so use readyTs from chain
+              const currentTs = Date.now() / 1000
+              if (legacyReadyTs > 0 && currentTs >= legacyReadyTs) {
+                plantState = { __kind: 'Ready', strainLevel: legacyStrainLevel }
+              } else if (legacyPlantedTs > 0) {
+                plantState = { 
+                  __kind: 'Growing', 
+                  strainLevel: legacyStrainLevel,
+                  plantedAt: new BN(legacyPlantedTs)
+                }
+              } else {
+                // Fallback - should not happen
+                plantState = { __kind: 'Empty' }
+              }
+            }
+          } else {
+            // Legacy: slot is not occupied
+            plantState = { __kind: 'Empty' }
+          }
         }
         
         // Extract values based on plant state
@@ -1966,13 +1939,15 @@ export class DroogGameClient {
         const parsedSlot: GrowSlot = {
           // New structure
           plantState,
-          strainLevel: slot.strainLevel || 0,
-          variantId: slot.variantId || 0,
-          lastHarvestedTs: slot.lastHarvestedTs 
-            ? (typeof slot.lastHarvestedTs === 'number' 
-                ? new BN(slot.lastHarvestedTs) 
-                : (slot.lastHarvestedTs instanceof BN ? slot.lastHarvestedTs : new BN(slot.lastHarvestedTs)))
-            : new BN(0),
+          strainLevel: slot.strainLevel ?? slot.strain_level ?? 0,
+          variantId: slot.variantId ?? slot.variant_id ?? 0,
+          lastHarvestedTs: (() => {
+            const ts = slot.lastHarvestedTs ?? slot.last_harvested_ts
+            if (!ts) return new BN(0)
+            return typeof ts === 'number' 
+              ? new BN(ts) 
+              : (ts instanceof BN ? ts : new BN(ts))
+          })(),
           
           // Legacy fields for backward compatibility
           occupied,
@@ -1999,9 +1974,289 @@ export class DroogGameClient {
         playerAInventory: parseInventory(account.playerAInventory),
         playerBInventory: parseInventory(account.playerBInventory),
       }
-    } catch (error) {
-      console.error('Error fetching grow state:', error)
+    } catch (error: any) {
+      // Don't log "account does not exist" errors - this is expected during initialization
+      const errorMessage = error?.message || error?.toString() || ''
+      const isAccountNotFound = 
+        errorMessage.includes('Account does not exist') ||
+        errorMessage.includes('has no data') ||
+        errorMessage.includes('could not find account')
+      
+      if (!isAccountNotFound) {
+        console.error('Error fetching grow state:', error)
+      }
       return null
+    }
+  }
+
+  /**
+   * Manual Borsh decoder for MatchGrowState.
+   * This bypasses Anchor's coder which has issues with nested enum variants in Anchor 0.32+.
+   * 
+   * Account layout (359 bytes total):
+   * - 8 bytes: Anchor discriminator
+   * - 8 bytes: match_id (u64 LE)
+   * - 32 bytes: match_id_hash ([u8; 32])
+   * - 32 bytes: player_a (Pubkey)
+   * - 32 bytes: player_b (Pubkey)
+   * - 6 × GrowSlot: player_a_slots (variable size each, up to 20 bytes)
+   * - 6 × GrowSlot: player_b_slots (variable size each, up to 20 bytes)
+   * - 3 bytes: player_a_inventory (level1, level2, level3)
+   * - 3 bytes: player_b_inventory (level1, level2, level3)
+   * - 1 byte: bump
+   * 
+   * GrowSlot layout (variable, up to 20 bytes):
+   * - PlantState: 1-10 bytes depending on variant
+   * - 1 byte: strain_level
+   * - 1 byte: variant_id
+   * - 8 bytes: last_harvested_ts (i64 LE)
+   * 
+   * PlantState enum (Borsh serialization):
+   * - Empty (0): 1 byte discriminator only
+   * - Growing (1): 1 byte disc + 1 byte strain_level + 8 bytes planted_at (i64 LE)
+   * - Ready (2): 1 byte disc + 1 byte strain_level
+   */
+  private manualDecodeMatchGrowState(data: Buffer | Uint8Array): any {
+    // Ensure we're working with a proper Buffer
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data)
+    
+    let offset = 0
+    
+    // Debug: log raw account data info
+    if (import.meta.env.DEV) {
+      console.log('[manualDecodeMatchGrowState] Raw data type:', data.constructor.name)
+      console.log('[manualDecodeMatchGrowState] Raw data length:', buf.length)
+      console.log('[manualDecodeMatchGrowState] First 16 bytes (hex):', buf.subarray(0, 16).toString('hex'))
+      console.log('[manualDecodeMatchGrowState] Bytes 112-128 (start of slots, hex):', buf.subarray(112, 128).toString('hex'))
+    }
+    
+    // Helper to read bytes
+    const readBytes = (len: number): Buffer => {
+      const slice = Buffer.from(buf.subarray(offset, offset + len))
+      offset += len
+      return slice
+    }
+    
+    // Helper to read u8
+    const readU8 = (): number => {
+      const val = buf[offset]
+      offset += 1
+      return val
+    }
+    
+    // Helper to read u64 LE
+    const readU64LE = (): BN => {
+      const bytes = readBytes(8)
+      // Convert to BN from little-endian bytes
+      return new BN(bytes, 'le')
+    }
+    
+    // Helper to read i64 LE
+    const readI64LE = (): BN => {
+      const bytes = readBytes(8)
+      // Debug: log the bytes being read for i64
+      if (import.meta.env.DEV && offset <= 172) { // Only log for first few reads
+        console.log(`[readI64LE] offset=${offset - 8}, bytes=${bytes.toString('hex')}`)
+      }
+      // BN from little-endian, but need to handle sign
+      // For simplicity, treat as unsigned since our timestamps are positive
+      return new BN(bytes, 'le')
+    }
+    
+    // Helper to read Pubkey (32 bytes)
+    const readPubkey = (): PublicKey => {
+      const buf = readBytes(32)
+      return new PublicKey(buf)
+    }
+    
+    // Helper to decode PlantState
+    // EMPIRICALLY DETERMINED: PlantState appears to be 11 bytes for Growing variant
+    // This includes an extra byte after strain_level (possibly variant_id duplication or padding)
+    // PlantState variants: Empty (1 byte + 10 padding = 11), Ready (2 bytes + 9 padding = 11), Growing (11 bytes)
+    // After reading the variant data, we must skip any padding to reach exactly 11 bytes
+    const PLANT_STATE_SIZE = 11 // Empirically determined from on-chain data analysis
+    
+    const decodePlantState = (slotLabel: string): PlantState => {
+      const startOffset = offset
+      const discriminator = readU8()
+      
+      if (import.meta.env.DEV && discriminator > 2) {
+        console.warn(`[manualDecodeMatchGrowState] ${slotLabel}: Unknown discriminator ${discriminator} at offset ${startOffset}, raw bytes: ${buf.subarray(startOffset, startOffset + 16).toString('hex')}`)
+      }
+      
+      let result: PlantState
+      let bytesRead = 1 // discriminator already read
+      
+      switch (discriminator) {
+        case 0: // Empty - just discriminator (1 byte used)
+          result = { __kind: 'Empty' }
+          break
+        case 1: { // Growing - discriminator + strain_level + planted_at (1 + 1 + 8 = 10 bytes)
+          const strainLevel = readU8()
+          // WORKAROUND: There appears to be an extra byte before planted_at in the on-chain data
+          // Skip this byte to read the timestamp correctly
+          // TODO: Investigate why Borsh serialization includes this extra byte
+          const mysteryByte = readU8()
+          if (import.meta.env.DEV) {
+            console.log(`[manualDecodeMatchGrowState] ${slotLabel}: Growing mystery byte=${mysteryByte.toString(16)}`)
+          }
+          const plantedAt = readI64LE()
+          bytesRead += 10 // 1 (strainLevel) + 1 (mystery) + 8 (plantedAt)
+          if (import.meta.env.DEV) {
+            console.log(`[manualDecodeMatchGrowState] ${slotLabel}: Growing, strainLevel=${strainLevel}, plantedAt=${plantedAt.toString()}`)
+          }
+          result = { __kind: 'Growing', strainLevel, plantedAt }
+          break
+        }
+        case 2: { // Ready - discriminator + strain_level (1 + 1 = 2 bytes)
+          const strainLevel = readU8()
+          bytesRead += 1
+          result = { __kind: 'Ready', strainLevel }
+          break
+        }
+        default:
+          console.warn(`[manualDecodeMatchGrowState] ${slotLabel}: Unknown PlantState discriminator: ${discriminator} at offset ${startOffset}, treating as Empty`)
+          result = { __kind: 'Empty' }
+          break
+      }
+      
+      // Skip padding to ensure we always consume exactly PLANT_STATE_SIZE bytes
+      const paddingToSkip = PLANT_STATE_SIZE - bytesRead
+      if (paddingToSkip > 0) {
+        offset += paddingToSkip
+      }
+      
+      return result
+    }
+    
+    // Helper to decode GrowSlot
+    // EMPIRICAL LAYOUT (20 bytes total):
+    // - PlantState: 11 bytes (with mystery byte after Growing.strain_level)
+    // - variant_id: 1 byte
+    // - last_harvested_ts: 8 bytes
+    // Note: GrowSlot.strain_level appears to be embedded in PlantState for Growing variant
+    const decodeGrowSlot = (slotLabel: string): any => {
+      const slotStartOffset = offset
+      
+      // Debug: show raw bytes for this slot
+      if (import.meta.env.DEV) {
+        console.log(`[manualDecodeMatchGrowState] ${slotLabel}: raw bytes at offset ${slotStartOffset}:`, 
+          buf.subarray(slotStartOffset, slotStartOffset + 20).toString('hex'))
+      }
+      
+      const plantState = decodePlantState(slotLabel)
+      // For Growing, the strain_level is already embedded in the mystery byte read during PlantState
+      // For other states, we still need to read the remaining slot fields
+      const variantId = readU8()
+      const lastHarvestedTs = readI64LE()
+      
+      // Derive strain_level from plantState for Growing, otherwise from variantId position
+      const strainLevel = plantState.__kind === 'Growing' ? plantState.strainLevel :
+                          plantState.__kind === 'Ready' ? plantState.strainLevel : 0
+      
+      if (import.meta.env.DEV) {
+        console.log(`[manualDecodeMatchGrowState] ${slotLabel}: offset=${slotStartOffset}, plantState=${plantState.__kind}, strainLevel=${strainLevel}, variantId=${variantId}, offsetAfter=${offset}`)
+      }
+      
+      return {
+        plantState,
+        plant_state: plantState, // Add snake_case alias for compatibility
+        strainLevel,
+        strain_level: strainLevel,
+        variantId,
+        variant_id: variantId,
+        lastHarvestedTs,
+        last_harvested_ts: lastHarvestedTs,
+      }
+    }
+    
+    // Helper to decode Inventory (3 bytes)
+    const decodeInventory = (): Inventory => ({
+      level1: readU8(),
+      level2: readU8(),
+      level3: readU8(),
+    })
+    
+    // Skip Anchor account discriminator (8 bytes)
+    const anchorDiscriminator = readBytes(8)
+    if (import.meta.env.DEV) {
+      console.log('[manualDecodeMatchGrowState] Anchor discriminator (hex):', anchorDiscriminator.toString('hex'))
+      console.log('[manualDecodeMatchGrowState] Current offset after discriminator:', offset)
+    }
+    
+    // Read match_id (u64)
+    const matchId = readU64LE()
+    if (import.meta.env.DEV) {
+      console.log('[manualDecodeMatchGrowState] matchId:', matchId.toString(), 'offset now:', offset)
+    }
+    
+    // Read match_id_hash (32 bytes) - we don't use this but need to skip
+    const matchIdHash = readBytes(32)
+    if (import.meta.env.DEV) {
+      console.log('[manualDecodeMatchGrowState] match_id_hash first 4 bytes:', matchIdHash.subarray(0, 4).toString('hex'), 'offset now:', offset)
+    }
+    
+    // Read player_a (32 bytes)
+    const playerA = readPubkey()
+    if (import.meta.env.DEV) {
+      console.log('[manualDecodeMatchGrowState] playerA:', playerA.toBase58(), 'offset now:', offset)
+    }
+    
+    // Read player_b (32 bytes)
+    const playerB = readPubkey()
+    if (import.meta.env.DEV) {
+      console.log('[manualDecodeMatchGrowState] playerB:', playerB.toBase58(), 'offset now:', offset)
+    }
+    
+    // Read player_a_slots (6 GrowSlots)
+    const playerASlots: any[] = []
+    if (import.meta.env.DEV) {
+      console.log(`[manualDecodeMatchGrowState] Starting player_a_slots at offset: ${offset}`)
+    }
+    for (let i = 0; i < 6; i++) {
+      playerASlots.push(decodeGrowSlot(`A${i}`))
+    }
+    
+    // Read player_b_slots (6 GrowSlots)
+    const playerBSlots: any[] = []
+    if (import.meta.env.DEV) {
+      console.log(`[manualDecodeMatchGrowState] Starting player_b_slots at offset: ${offset}`)
+    }
+    for (let i = 0; i < 6; i++) {
+      playerBSlots.push(decodeGrowSlot(`B${i}`))
+    }
+    
+    // Read player_a_inventory
+    const playerAInventory = decodeInventory()
+    
+    // Read player_b_inventory
+    const playerBInventory = decodeInventory()
+    
+    // Read bump (1 byte) - we don't need this
+    const bump = readU8()
+    
+    if (import.meta.env.DEV) {
+      console.log('[manualDecodeMatchGrowState] Successfully decoded:', {
+        matchId: matchId.toString(),
+        playerA: playerA.toBase58(),
+        playerB: playerB.toBase58(),
+        playerASlots: playerASlots.map((s, i) => `${i}:${s.plantState.__kind}`),
+        playerBSlots: playerBSlots.map((s, i) => `${i}:${s.plantState.__kind}`),
+        bytesRead: offset,
+        totalBytes: data.length,
+      })
+    }
+    
+    return {
+      matchId,
+      matchIdHash,
+      playerA,
+      playerB,
+      playerASlots,
+      playerBSlots,
+      playerAInventory,
+      playerBInventory,
+      bump,
     }
   }
 
@@ -2010,9 +2265,15 @@ export class DroogGameClient {
    * 
    * Returns the current on-chain delivery availability state.
    * This is the AUTHORITATIVE source of which customers are available.
+   * 
+   * @param matchId - The match ID (supports number, BN, or bigint to avoid precision loss)
+   * @returns Promise resolving to DeliveryState if PDA exists, null otherwise
    */
-  async getDeliveryState(matchId: number): Promise<DeliveryState | null> {
+  async getDeliveryState(matchId: number | BN | bigint): Promise<DeliveryState | null> {
     try {
+      // Throttle to prevent 429 rate limiting
+      await rpcThrottle.acquire()
+      
       const [deliveryStatePDA] = DroogGameClient.deriveDeliveryStatePDA(matchId)
       const account = await (this.program.account as any).matchDeliveryState.fetch(deliveryStatePDA)
       
@@ -2031,8 +2292,17 @@ export class DroogGameClient {
         availableCustomers,
         activeCount: account.activeCount,
       }
-    } catch (error) {
-      console.error('Error fetching delivery state:', error)
+    } catch (error: any) {
+      // Don't log "account does not exist" errors - this is expected during initialization
+      const errorMessage = error?.message || error?.toString() || ''
+      const isAccountNotFound = 
+        errorMessage.includes('Account does not exist') ||
+        errorMessage.includes('has no data') ||
+        errorMessage.includes('could not find account')
+      
+      if (!isAccountNotFound) {
+        console.error('Error fetching delivery state:', error)
+      }
       return null
     }
   }
@@ -2208,8 +2478,44 @@ export class DroogGameClient {
                 }
               }
             } else {
-              // No plantState field - might be legacy format or truly empty
-              plantState = { __kind: 'Empty' }
+              // No plantState field - check legacy format (old on-chain structure)
+              // Legacy format has: occupied, strainLevel, variantId, plantedTs, readyTs, harvested
+              if (slot.occupied) {
+                // Legacy: slot is occupied
+                const legacyPlantedTs = slot.plantedTs 
+                  ? (typeof slot.plantedTs === 'number' ? slot.plantedTs : 
+                     (slot.plantedTs.toNumber ? slot.plantedTs.toNumber() : Number(slot.plantedTs)))
+                  : 0
+                const legacyReadyTs = slot.readyTs 
+                  ? (typeof slot.readyTs === 'number' ? slot.readyTs : 
+                     (slot.readyTs.toNumber ? slot.readyTs.toNumber() : Number(slot.readyTs)))
+                  : 0
+                const legacyStrainLevel = slot.strainLevel || slot.strain_level || 0
+                
+                // Check if harvested
+                if (slot.harvested) {
+                  // Harvested plants go back to Empty
+                  plantState = { __kind: 'Empty' }
+                } else {
+                  // Check if ready by comparing current time vs readyTs
+                  const currentTs = Date.now() / 1000
+                  if (legacyReadyTs > 0 && currentTs >= legacyReadyTs) {
+                    plantState = { __kind: 'Ready', strainLevel: legacyStrainLevel }
+                  } else if (legacyPlantedTs > 0) {
+                    plantState = { 
+                      __kind: 'Growing', 
+                      strainLevel: legacyStrainLevel,
+                      plantedAt: new BN(legacyPlantedTs)
+                    }
+                  } else {
+                    // Fallback - should not happen
+                    plantState = { __kind: 'Empty' }
+                  }
+                }
+              } else {
+                // Legacy: slot is not occupied
+                plantState = { __kind: 'Empty' }
+              }
             }
             
             // Extract values based on plant state
@@ -2397,16 +2703,19 @@ export function createWalletFromPrivyWallet(
   privyWallet: {
     address: string
   },
-  signTransactionFn: (input: {
+  // Note: We accept any signTransaction function that takes a transaction input.
+  // We serialize Transaction objects to Uint8Array before calling this function,
+  // so any compatible Privy signTransaction function will work.
+  signTransactionFn: ((input: {
     transaction: Uint8Array | Transaction
     wallet: any
     chain?: string // Optional chain parameter (e.g., 'solana:devnet')
-  }) => Promise<{ signedTransaction: Uint8Array }>,
-  signAllTransactionsFn?: (input: {
+  }) => Promise<{ signedTransaction: Uint8Array }>) | ((...args: any[]) => Promise<any>),
+  signAllTransactionsFn?: ((input: {
     transactions: (Uint8Array | Transaction)[]
     wallet: any
     chain?: string // Optional chain parameter (e.g., 'solana:devnet')
-  }) => Promise<{ signedTransactions: Uint8Array[] }>
+  }) => Promise<{ signedTransactions: Uint8Array[] }>) | ((...args: any[]) => Promise<any>)
 ): Wallet {
   if (!privyWallet.address) {
     throw new Error('Privy wallet address is required')

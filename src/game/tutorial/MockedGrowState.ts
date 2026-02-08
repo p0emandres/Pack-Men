@@ -140,21 +140,37 @@ function createMockedGrowState(): {
   const slots = mocked.getSlots()
 
   // Create player A slots (first 6 slots)
-  const playerASlots: GrowSlot[] = slots.map(slot => ({
-    plantState: slot.harvested
-      ? { __kind: 'Empty' as const }
-      : slot.isReady
-      ? { __kind: 'Ready' as const, strainLevel: slot.strainLevel }
-      : { __kind: 'Growing' as const, strainLevel: slot.strainLevel, plantedAt: new BN(matchStartTs - 180) },
-    strainLevel: slot.strainLevel,
-    variantId: slot.variantId,
-  }))
+  const playerASlots: GrowSlot[] = slots.map(slot => {
+    const plantedTs = new BN(matchStartTs - 180)
+    const growthTime = GROWTH_TIMES[slot.strainLevel as 1 | 2 | 3] || 120
+    const readyTs = new BN(plantedTs.toNumber() + growthTime)
+    
+    return {
+      plantState: slot.harvested
+        ? { __kind: 'Empty' as const }
+        : slot.isReady
+        ? { __kind: 'Ready' as const, strainLevel: slot.strainLevel }
+        : { __kind: 'Growing' as const, strainLevel: slot.strainLevel, plantedAt: plantedTs },
+      strainLevel: slot.strainLevel,
+      variantId: slot.variantId,
+      lastHarvestedTs: new BN(0),
+      occupied: slot.occupied,
+      plantedTs,
+      readyTs,
+      harvested: slot.harvested,
+    }
+  })
 
   // Create player B slots (empty for demo)
   const playerBSlots: GrowSlot[] = Array(SLOTS_PER_PLAYER).fill(null).map(() => ({
     plantState: { __kind: 'Empty' as const },
     strainLevel: 0,
     variantId: 0,
+    lastHarvestedTs: new BN(0),
+    occupied: false,
+    plantedTs: new BN(0),
+    readyTs: new BN(0),
+    harvested: false,
   }))
 
   // Create mocked GrowState

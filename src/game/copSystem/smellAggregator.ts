@@ -175,7 +175,7 @@ export class SmellAggregator {
    * Get new cop types to spawn when escalating.
    * Returns the difference in composition between current and previous tier.
    */
-  getNewCopsToSpawn(previousTier: SmellTier): Partial<CopComposition> {
+  getNewCopsToSpawn(previousTier: SmellTier): { pinky: number; inky: number; blinky: number; clyde: number } {
     const currentBudget = this.getCopBudget()
     const previousComposition = SMELL_TIERS[previousTier].composition
     const currentComposition = currentBudget.composition

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { PlantGrowthDisplay, plantGrowthStyles } from './PlantGrowthDisplay'
-import { getCurrentMatchTime } from '../game/timeUtils'
 import { growSlotTracker } from '../game/growSlotTracker'
 
 interface InventoryModalProps {
@@ -18,14 +17,14 @@ export function InventoryModal({
   matchEndTs,
   onHarvest,
 }: InventoryModalProps) {
-  const [currentTs, setCurrentTs] = useState<number>(getCurrentMatchTime())
+  const [currentTs, setCurrentTs] = useState<number>(Date.now() / 1000)
 
   // Update current time every second
   useEffect(() => {
     if (!isOpen || matchStartTs === null) return
 
     const interval = setInterval(() => {
-      setCurrentTs(getCurrentMatchTime())
+      setCurrentTs(Date.now() / 1000)
     }, 1000)
 
     return () => clearInterval(interval)

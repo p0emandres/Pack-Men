@@ -80,8 +80,9 @@ impl MatchGrowState {
     /// Account size calculation
     /// 8 (discriminator) + 8 (match_id) + 32 (match_id_hash) + 32 (player_a) + 32 (player_b)
     /// + (6 * GrowSlot::SIZE * 2) + (Inventory::SIZE * 2) + 1 (bump)
-    /// GrowSlot::SIZE = 11 bytes (1 plant_state + 1 strain_level + 1 variant_id + 8 last_harvested_ts)
+    /// GrowSlot::SIZE = 20 bytes (10 plant_state_max + 1 strain_level + 1 variant_id + 8 last_harvested_ts)
     /// Inventory::SIZE = 3 bytes (1 + 1 + 1)
+    /// Total: 8 + 8 + 32 + 32 + 32 + (6 * 20 * 2) + (3 * 2) + 1 = 359 bytes
     pub const SIZE: usize = 8 + 8 + 32 + 32 + 32 + (SLOTS_PER_PLAYER * GrowSlot::SIZE * 2) + (Inventory::SIZE * 2) + 1;
     
     /// Get growth time for a strain level (1, 2, or 3)
@@ -125,12 +126,13 @@ impl MatchGrowState {
     }
     
     /// Compute deterministic variant ID from match parameters
-    /// Uses a simple hash: (match_id XOR player_key_bytes XOR slot_index XOR planted_ts) % VARIANT_COUNT
+    /// Uses a simple hash: (match_id XOR player_key_bytes XOR slot_index XOR slot_number) % VARIANT_COUNT
+    /// Uses slot number instead of timestamp for better entropy (slot changes every ~400ms, timestamp changes every 1s)
     pub fn compute_variant_id(
         match_id: u64,
         player: &Pubkey,
         slot_index: u8,
-        planted_ts: i64,
+        slot_number: u64,
     ) -> u8 {
         // Simple deterministic hash using XOR and byte mixing
         let player_bytes = player.to_bytes();
@@ -143,9 +145,9 @@ impl MatchGrowState {
             hash ^= u64::from_le_bytes(bytes);
         }
         
-        // Mix in slot index and planted timestamp
+        // Mix in slot index and slot number (better entropy than timestamp)
         hash ^= slot_index as u64;
-        hash ^= planted_ts as u64;
+        hash ^= slot_number;
         
         // Final mixing (simple avalanche)
         hash = hash.wrapping_mul(0x517cc1b727220a95);
@@ -219,8 +221,9 @@ pub struct GrowSlot {
 }
 
 impl GrowSlot {
-    /// Size: 1 (plant_state) + 1 (strain_level) + 1 (variant_id) + 8 (last_harvested_ts)
-    pub const SIZE: usize = 1 + 1 + 1 + 8;
+    /// Size: 10 (plant_state max variant: 1 discriminator + 1 strain_level + 8 planted_at) 
+    ///       + 1 (strain_level) + 1 (variant_id) + 8 (last_harvested_ts) = 20 bytes
+    pub const SIZE: usize = 10 + 1 + 1 + 8;
     
     /// Advance plant state if growth time has elapsed (lazy evaluation)
     /// Called before any state check to ensure state is up-to-date

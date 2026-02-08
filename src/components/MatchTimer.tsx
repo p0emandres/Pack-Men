@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Connection, Keypair, PublicKey } from '@solana/web3.js'
+import { createSolanaConnection } from '../game/solanaConnection'
 import { DroogGameClient, createWalletFromKeypair } from '../game/solanaClient'
 import { identityStore } from '../game/identityStore'
 import { getCurrentMatchTime } from '../game/timeUtils'
@@ -55,11 +56,8 @@ export function MatchTimer({ matchStartTs: propMatchStartTs, matchEndTs: propMat
       }
 
       try {
-        // Create connection and client
-        connection = new Connection(
-          import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com',
-          'confirmed'
-        )
+        // Create connection and client with proper WebSocket endpoint
+        connection = createSolanaConnection('confirmed')
         const dummyKeypair = Keypair.generate()
         const dummyWallet = createWalletFromKeypair(dummyKeypair)
         solanaClient = await DroogGameClient.create(connection, dummyWallet)
@@ -91,10 +89,13 @@ export function MatchTimer({ matchStartTs: propMatchStartTs, matchEndTs: propMat
         // Get match state from chain
         if (solanaClient && identity.matchId) {
           try {
-            const matchState = await solanaClient.getMatchState(identity.matchId)
-            if (matchState) {
-              setMatchStartTs(matchState.matchStartTs.toNumber())
-              setMatchEndTs(matchState.matchEndTs.toNumber())
+            const matchIdNum = parseInt(identity.matchId, 10)
+            if (!isNaN(matchIdNum)) {
+              const matchState = await solanaClient.getMatchState(matchIdNum)
+              if (matchState) {
+                setMatchStartTs(matchState.startTs.toNumber())
+                setMatchEndTs(matchState.endTs.toNumber())
+              }
             }
           } catch (error) {
             // Error fetching match state - silently continue
@@ -124,13 +125,13 @@ export function MatchTimer({ matchStartTs: propMatchStartTs, matchEndTs: propMat
       return
     }
 
-    // Ensure matchStartTs and matchEndTs are numbers (defensive check)
-    const startTs = typeof matchStartTs === 'number' ? matchStartTs : (matchStartTs.toNumber ? matchStartTs.toNumber() : Number(matchStartTs))
-    const endTs = typeof matchEndTs === 'number' ? matchEndTs : (matchEndTs.toNumber ? matchEndTs.toNumber() : Number(matchEndTs))
+    // matchStartTs and matchEndTs are already guaranteed to be numbers after the null check
+    const startTs = matchStartTs
+    const endTs = matchEndTs
 
     const updateTime = () => {
-      const currentTime = getCurrentMatchTime(startTs)
-      const remaining = Math.max(0, endTs - currentTime)
+      const now = Date.now() / 1000
+      const remaining = Math.max(0, endTs - now)
       setTimeRemaining(remaining)
     }
 

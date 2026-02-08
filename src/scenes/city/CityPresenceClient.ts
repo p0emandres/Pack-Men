@@ -222,7 +222,6 @@ export class CityPresenceClient {
       const isDev = window.location.port === '3000' || window.location.hostname === 'localhost'
       if (isDev) {
         apiBaseUrl = `http://localhost:3001`
-        console.log('[CityPresenceClient] Development mode: connecting directly to backend on port 3001')
       } else {
         // In production, use same host
         apiBaseUrl = `${window.location.protocol}//${window.location.host}`
@@ -235,13 +234,11 @@ export class CityPresenceClient {
     // Construct WebSocket URL
     const url = `${wsProtocol}://${wsHost}/api/presence/${this.matchId}?token=${encodeURIComponent(this.identity.sessionJwt)}`
 
-    console.log('[CityPresenceClient] Connecting to:', url.replace(this.identity.sessionJwt, '[TOKEN]'))
 
     try {
       this.ws = new WebSocket(url)
 
       this.ws.onopen = () => {
-        console.log('[CityPresenceClient] Connected to presence server')
         this.isConnected = true
         this.reconnectAttempts = 0
         this.reconnectDelay = 1000
@@ -258,12 +255,10 @@ export class CityPresenceClient {
         // This ensures the player appears in the presence store from the start
         if (this.getPlayerStateCallback) {
           const state = this.getPlayerStateCallback()
-          console.log(`[CityPresenceClient] Sending initial presence on connect: (${state.position.x.toFixed(2)}, ${state.position.y.toFixed(2)}, ${state.position.z.toFixed(2)})`)
           this.sendUpdate({ ...state })
         } else {
           // No callback yet - send a default presence at city spawn point
           // This ensures player appears in presence store immediately
-          console.log('[CityPresenceClient] Sending default presence on connect (no callback yet)')
           this.sendUpdate({
             position: { x: 132, y: 0, z: -125 }, // Default city spawn position
             rotation: 0,
@@ -276,9 +271,6 @@ export class CityPresenceClient {
         try {
           const message = JSON.parse(event.data)
           const clientTs = Date.now()
-          
-          // Log every message received for debugging
-          console.log(`[CityPresenceClient] Received message type: ${message.type}`)
           
           if (message.type === 'presence_snapshot') {
             const snapshot = message as PresenceSnapshotMessage
@@ -295,24 +287,9 @@ export class CityPresenceClient {
               (p) => p.playerId !== this.identity.privyUserId
             )
             
-            // DIAGNOSTIC: Log ALL snapshots to debug visibility issue
-            console.log(`%c[CityPresenceClient] SNAPSHOT RECEIVED: total=${totalPresences}, remote=${remotePresences.length}, myId=${this.identity.privyUserId.slice(-8)}, hasCallback=${!!this.updateCallback}`, 'background: #222; color: #bada55; font-weight: bold;')
-            
-            // Log all presences to see exactly what we're receiving
-            for (const p of snapshot.presences) {
-              const isMe = p.playerId === this.identity.privyUserId
-              console.log(`[CityPresenceClient]   ${isMe ? '[ME]' : '[REMOTE]'} ${p.playerId.slice(-8)}: pos=(${p.position.x.toFixed(2)}, ${p.position.y.toFixed(2)}, ${p.position.z.toFixed(2)})`)
-            }
-            
             // Always call the callback with server timestamp for proper interpolation
             if (this.updateCallback) {
               try {
-                if (remotePresences.length > 0) {
-                  console.log(`%c[CityPresenceClient] >>> CALLING updateCallback with ${remotePresences.length} REMOTE player(s)`, 'background: #007acc; color: white; font-weight: bold;')
-                  for (const p of remotePresences) {
-                    console.log(`[CityPresenceClient]   REMOTE player: ${p.playerId.slice(-8)} at (${p.position.x.toFixed(2)}, ${p.position.y.toFixed(2)}, ${p.position.z.toFixed(2)})`)
-                  }
-                }
                 this.updateCallback(remotePresences, snapshot.serverTs)
               } catch (error) {
                 console.error('[CityPresenceClient] Error in presence update callback:', error)
@@ -346,7 +323,6 @@ export class CityPresenceClient {
       }
 
       this.ws.onclose = (event) => {
-        console.log('[CityPresenceClient] WebSocket closed:', event.code, event.reason)
         this.isConnected = false
         this.connectionStateCallback?.(false)
         this.ws = null
@@ -362,7 +338,6 @@ export class CityPresenceClient {
         const shouldReconnect = !this.isDestroyed && (event.code !== 1000 || isConnectionTimeout)
         
         if (shouldReconnect) {
-          console.log('[CityPresenceClient] Will attempt reconnection')
           this.scheduleReconnect()
         }
       }
@@ -377,7 +352,6 @@ export class CityPresenceClient {
    */
   private scheduleReconnect(): void {
     if (this.isDestroyed || this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('[CityPresenceClient] Max reconnection attempts reached or destroyed')
       return
     }
 
@@ -387,8 +361,6 @@ export class CityPresenceClient {
 
     this.reconnectAttempts++
     const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), 30000) // Max 30 seconds
-
-    console.log(`[CityPresenceClient] Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`)
 
     this.reconnectTimeout = window.setTimeout(() => {
       this.connect()
@@ -402,7 +374,6 @@ export class CityPresenceClient {
    */
   sendUpdate(update: Omit<PresenceUpdate, 'type'>): void {
     if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn(`[CityPresenceClient] Cannot send update: connected=${this.isConnected}, ws=${!!this.ws}, readyState=${this.ws?.readyState}`)
       return
     }
 
@@ -413,10 +384,6 @@ export class CityPresenceClient {
       }
       this.ws.send(JSON.stringify(message))
       this.updatesSentCount++
-      // Log every 15 updates (about once per second at 15Hz)
-      if (this.updatesSentCount % 15 === 0) {
-        console.log(`[CityPresenceClient] Sent ${this.updatesSentCount} updates, ws readyState: ${this.ws.readyState}`)
-      }
     } catch (error) {
       console.error('[CityPresenceClient] Error sending update:', error)
     }
@@ -434,7 +401,6 @@ export class CityPresenceClient {
     try {
       const message: LeaveMessage = { type: 'leave' }
       this.ws.send(JSON.stringify(message))
-      console.log('[CityPresenceClient] Sent leave message')
     } catch (error) {
       console.error('[CityPresenceClient] Error sending leave:', error)
     }
@@ -491,14 +457,11 @@ export class CityPresenceClient {
    * Sends an immediate update when starting to ensure other players see the player right away.
    */
   startSendingUpdates(getPlayerState: () => Omit<PresenceUpdate, 'type' | 'timestamp'>): void {
-    console.log(`[CityPresenceClient] startSendingUpdates called, isConnected: ${this.isConnected}, ws readyState: ${this.ws?.readyState}`)
-    
     // Store callback for immediate updates
     this.getPlayerStateCallback = getPlayerState
 
     if (this.sendInterval) {
       // Already sending, but send immediate update anyway to ensure latest position is broadcast
-      console.log('[CityPresenceClient] Already has sendInterval, sending immediate update')
       if (this.isConnected) {
         const state = getPlayerState()
         this.sendUpdate(state)
@@ -509,10 +472,7 @@ export class CityPresenceClient {
     // Send immediate update when starting (important when exiting rooms)
     if (this.isConnected) {
       const state = getPlayerState()
-      console.log(`[CityPresenceClient] Sending initial update at position (${state.position.x.toFixed(2)}, ${state.position.y.toFixed(2)}, ${state.position.z.toFixed(2)})`)
       this.sendUpdate(state)
-    } else {
-      console.warn('[CityPresenceClient] Not connected, cannot send initial update')
     }
 
     this.sendInterval = window.setInterval(() => {
@@ -521,22 +481,6 @@ export class CityPresenceClient {
         this.sendUpdate(state)
       }
     }, this.SEND_INTERVAL_MS)
-    
-    console.log('[CityPresenceClient] Started periodic updates interval')
-    
-    // Periodic WebSocket health check (every 3 seconds)
-    const healthCheckInterval = window.setInterval(() => {
-      if (!this.ws) {
-        console.warn('[CityPresenceClient] HEALTH CHECK: WebSocket is null!')
-        clearInterval(healthCheckInterval)
-        return
-      }
-      console.log(`[CityPresenceClient] HEALTH CHECK: readyState=${this.ws.readyState}, isConnected=${this.isConnected}, updatesSent=${this.updatesSentCount}`)
-      if (this.ws.readyState !== WebSocket.OPEN) {
-        console.warn('[CityPresenceClient] HEALTH CHECK: WebSocket not open!')
-        clearInterval(healthCheckInterval)
-      }
-    }, 3000)
   }
 
   /**

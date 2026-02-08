@@ -4,6 +4,7 @@ import { CityPresenceClient, type PlayerPresenceData } from './CityPresenceClien
 import { CityEntities } from './CityEntities'
 import { CityRenderer } from './CityRenderer'
 import { deliveryIndicatorManager } from '../../game/deliveryIndicators'
+import { createMatchIdentity } from '../../game/matchIdentity'
 
 /**
  * Callback to get current player state for presence updates.
@@ -89,12 +90,25 @@ export class CityScene {
     // Initialize delivery indicators (async, non-blocking)
     // Indicators will be added to mainMapGroup and synced with on-chain availability
     if (this.identity.matchId) {
-      deliveryIndicatorManager.initialize(this.mainMapGroup, this.identity.matchId)
+      // Convert string matchId to bigint
+      createMatchIdentity(this.identity.matchId)
+        .then((matchIdentity) => {
+          const matchIdBigInt = BigInt(matchIdentity.u64.toString()) // Convert BN to bigint
+          return deliveryIndicatorManager.initialize(this.mainMapGroup, matchIdBigInt)
+        })
         .then(() => {
           console.log('[CityScene] Delivery indicators initialized')
         })
         .catch((error) => {
           console.error('[CityScene] Failed to initialize delivery indicators:', error)
+          // Initialize without matchId as fallback
+          deliveryIndicatorManager.initialize(this.mainMapGroup)
+            .then(() => {
+              console.log('[CityScene] Delivery indicators initialized (fallback, no matchId)')
+            })
+            .catch((fallbackError) => {
+              console.error('[CityScene] Failed to initialize delivery indicators (fallback):', fallbackError)
+            })
         })
     } else {
       // Initialize without matchId (all indicators visible, no availability tracking)
@@ -175,18 +189,9 @@ export class CityScene {
    * Best Practice: Updates are buffered in CityEntities, not rendered directly.
    */
   private handlePresenceUpdate(presences: PlayerPresenceData[], serverTs: number): void {
-    if (presences.length > 0) {
-      console.log(`%c[CityScene] handlePresenceUpdate: ${presences.length} presence(s), isPaused=${this.isPaused}`, 'background: #9c27b0; color: white; font-weight: bold;')
-    }
-    
     if (this.isDestroyed) {
       console.log(`[CityScene] Scene is destroyed, ignoring presence updates`)
       return
-    }
-    
-    // DIAGNOSTIC: Log each presence we're processing
-    for (const p of presences) {
-      console.log(`%c[CityScene] >>> Processing REMOTE player: ${p.playerId.slice(-8)} at (${p.position.x.toFixed(2)}, ${p.position.y.toFixed(2)}, ${p.position.z.toFixed(2)})`, 'background: #4caf50; color: white;')
     }
 
     // Update server time offset in entities for proper interpolation
@@ -208,16 +213,10 @@ export class CityScene {
 
     // Get current avatar player IDs
     const currentPlayerIds = new Set(this.entities.getPlayerIds())
-    console.log(`[CityScene] Current avatar player IDs: ${Array.from(currentPlayerIds).join(', ') || 'none'}`)
 
     // Update or spawn avatars
     for (const presence of presences) {
       try {
-        // Log presence data for debugging (reduced frequency)
-        if (Math.random() < 0.1) {
-          console.log(`[CityScene] Processing presence for player ${presence.playerId}: pos=(${presence.position.x.toFixed(2)}, ${presence.position.y.toFixed(2)}, ${presence.position.z.toFixed(2)}), serverTs=${presence.serverTs}`)
-        }
-        
         const hasAvatar = this.entities.hasAvatar(presence.playerId)
         const isSpawning = this.entities.isSpawning(presence.playerId)
         

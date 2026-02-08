@@ -393,7 +393,7 @@ export type DroogGame = {
           "name": "matchState",
           "docs": [
             "The corresponding match state (must exist)",
-            "Using AccountLoader to avoid stack overflow during validation (account is large with 23 customers)"
+            "Boxed to avoid stack overflow (account is large with 23 customers)"
           ],
           "pda": {
             "seeds": [
@@ -1090,7 +1090,7 @@ export type DroogGame = {
     {
       "code": 6017,
       "name": "slotOccupied",
-      "msg": "Grow slot is already occupied"
+      "msg": "Grow slot is already occupied (plant_state is not Empty)"
     },
     {
       "code": 6018,
@@ -1099,18 +1099,18 @@ export type DroogGame = {
     },
     {
       "code": 6019,
-      "name": "alreadyHarvested",
-      "msg": "Plant has already been harvested"
-    },
-    {
-      "code": 6020,
       "name": "plantWontBeReady",
       "msg": "Plant will not be ready before match ends"
     },
     {
-      "code": 6021,
+      "code": 6020,
       "name": "insufficientInventory",
       "msg": "Insufficient inventory to complete this sale"
+    },
+    {
+      "code": 6021,
+      "name": "inventoryFull",
+      "msg": "Inventory is at capacity (6 items max)"
     },
     {
       "code": 6022,
@@ -1297,52 +1297,46 @@ export type DroogGame = {
       "name": "growSlot",
       "docs": [
         "Individual grow slot state",
-        "Once planted, strain_level, variant_id, and ready_ts are immutable"
+        "Slots represent land - they persist for the entire match",
+        "Plants are ephemeral - destroyed on harvest, slot immediately freed"
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "occupied",
+            "name": "plantState",
             "docs": [
-              "Whether this slot has a plant"
+              "Current plant state (Empty, Growing, or Ready)"
             ],
-            "type": "bool"
+            "type": {
+              "defined": {
+                "name": "plantState"
+              }
+            }
           },
           {
             "name": "strainLevel",
             "docs": [
-              "Strain level (1, 2, or 3) - immutable after planting"
+              "Strain level (1, 2, or 3) - stored for variant lookup after harvest",
+              "Only valid when plant_state != Empty (but kept for variant tracking)"
             ],
             "type": "u8"
           },
           {
             "name": "variantId",
             "docs": [
-              "Deterministic variant ID (0, 1, or 2) - immutable after planting"
+              "Deterministic variant ID (0, 1, or 2) - stored for variant lookup after harvest",
+              "Only valid when plant_state != Empty (but kept for variant tracking)"
             ],
             "type": "u8"
           },
           {
-            "name": "plantedTs",
+            "name": "lastHarvestedTs",
             "docs": [
-              "Timestamp when plant was started"
+              "Timestamp of last harvest (only valid when plant_state == Empty)",
+              "Used to determine most recently harvested variant for sales"
             ],
             "type": "i64"
-          },
-          {
-            "name": "readyTs",
-            "docs": [
-              "Timestamp when plant will be ready for harvest"
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "harvested",
-            "docs": [
-              "Whether this plant has been harvested"
-            ],
-            "type": "bool"
           }
         ]
       }
@@ -1423,6 +1417,10 @@ export type DroogGame = {
           {
             "name": "newInventoryCount",
             "type": "u8"
+          },
+          {
+            "name": "totalInventory",
+            "type": "u8"
           }
         ]
       }
@@ -1430,7 +1428,8 @@ export type DroogGame = {
     {
       "name": "inventory",
       "docs": [
-        "Player inventory - tracks harvested strains by level"
+        "Player inventory - tracks harvested strains by level",
+        "Fixed capacity system: hard limit of 6 total items prevents hoarding"
       ],
       "type": {
         "kind": "struct",
@@ -1734,6 +1733,52 @@ export type DroogGame = {
       }
     },
     {
+      "name": "plantState",
+      "docs": [
+        "Plant state enum - represents the lifecycle of a plant in a slot",
+        "Slots = Land (persistent), Plants = Ephemeral (destroyed on harvest)"
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "empty"
+          },
+          {
+            "name": "growing",
+            "fields": [
+              {
+                "name": "strainLevel",
+                "docs": [
+                  "Strain level (1, 2, or 3)"
+                ],
+                "type": "u8"
+              },
+              {
+                "name": "plantedAt",
+                "docs": [
+                  "Timestamp when plant was planted"
+                ],
+                "type": "i64"
+              }
+            ]
+          },
+          {
+            "name": "ready",
+            "fields": [
+              {
+                "name": "strainLevel",
+                "docs": [
+                  "Strain level (1, 2, or 3)"
+                ],
+                "type": "u8"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "name": "plantStrainEvent",
       "type": {
         "kind": "struct",
@@ -1760,10 +1805,6 @@ export type DroogGame = {
           },
           {
             "name": "plantedTs",
-            "type": "i64"
-          },
-          {
-            "name": "readyTs",
             "type": "i64"
           }
         ]

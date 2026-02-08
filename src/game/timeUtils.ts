@@ -1,43 +1,33 @@
 /**
  * Centralized time management for match-based timing
  * 
- * All time calculations should be anchored to matchStartTs from the chain,
- * not local system time. This prevents clock drift issues where the UI shows
- * "ready" but on-chain validation fails.
+ * All time calculations use direct absolute timestamp subtraction.
+ * No anchoring, no initialization, no offsets.
  * 
- * Rule: Client time is only for UX. All comparisons should be anchored to
- * the match start timestamp fetched from chain.
+ * Principle: "When you have an authoritative absolute timestamp, never derive another time origin."
+ * 
+ * The chain provides matchStartTs (absolute Unix timestamp).
+ * The client has Date.now()/1000 (absolute Unix timestamp).
+ * Calculate elapsed/remaining by direct subtraction.
  */
 
 /**
- * Track when a match started locally (for drift calculation)
- */
-let matchStartLocalTime: number | null = null
-
-/**
- * Initialize time tracking for a match
- * Call this when you fetch matchStartTs from the chain
+ * Initialize time tracking for a match (optional, for logging only)
+ * This function is kept for backward compatibility but does not anchor time.
  */
 export function initializeMatchTime(matchStartTs: number): void {
-  matchStartLocalTime = Date.now() / 1000
+  // Optional: keep for logging only, or delete entirely
+  if (import.meta.env.DEV) {
+    console.log('[TimeUtils] Match starts at:', matchStartTs)
+  }
 }
 
 /**
- * Get the current match time anchored to matchStartTs
- * This calculates: matchStartTs + (currentLocalTime - matchStartLocalTime)
- * 
- * If matchStartLocalTime is not initialized, falls back to Date.now() / 1000
- * but logs a warning.
+ * Get the current absolute time
+ * Returns Date.now() / 1000 (Unix timestamp in seconds)
  */
-export function getMatchTime(matchStartTs: number): number {
-  if (matchStartLocalTime === null) {
-    console.warn('Match time not initialized, using system time. Call initializeMatchTime() first.')
-    return Date.now() / 1000
-  }
-  
-  const currentLocalTime = Date.now() / 1000
-  const elapsedLocal = currentLocalTime - matchStartLocalTime
-  return matchStartTs + elapsedLocal
+export function getMatchTime(_matchStartTs: number): number {
+  return Date.now() / 1000
 }
 
 /**
@@ -48,14 +38,35 @@ export function getCurrentMatchTime(matchStartTs: number, currentTs?: number): n
   if (currentTs !== undefined) {
     return currentTs
   }
-  return getMatchTime(matchStartTs)
+  return Date.now() / 1000
 }
 
 /**
- * Reset match time tracking (call when match ends or changes)
+ * Get elapsed time since match start
+ * @param matchStartTs - Match start timestamp from chain (absolute Unix timestamp)
+ * @returns Elapsed time in seconds (never negative)
+ */
+export function getElapsedMatchTime(matchStartTs: number): number {
+  const now = Date.now() / 1000
+  return Math.max(0, now - matchStartTs)
+}
+
+/**
+ * Get remaining time until match end
+ * @param matchStartTs - Match start timestamp from chain (absolute Unix timestamp)
+ * @param matchEndTs - Match end timestamp from chain (absolute Unix timestamp)
+ * @returns Remaining time in seconds (never negative)
+ */
+export function getRemainingMatchTime(matchStartTs: number, matchEndTs: number): number {
+  const now = Date.now() / 1000
+  return Math.max(0, matchEndTs - now)
+}
+
+/**
+ * Reset match time tracking (no-op, kept for backward compatibility)
  */
 export function resetMatchTime(): void {
-  matchStartLocalTime = null
+  // No-op: no state to reset
 }
 
 /**
@@ -63,22 +74,14 @@ export function resetMatchTime(): void {
  * Call this periodically to ensure we're in sync with chain time
  * 
  * @param onChainTime - Current time from Clock::get() on-chain
- * @param matchStartTs - Match start timestamp from chain
  * @returns The drift in seconds (positive = local ahead, negative = local behind)
  */
-export function syncWithChainTime(onChainTime: number, matchStartTs: number): number {
-  if (matchStartLocalTime === null) {
-    initializeMatchTime(matchStartTs)
-    return 0
-  }
+export function syncWithChainTime(onChainTime: number): number {
+  const localTime = Date.now() / 1000
+  const drift = localTime - onChainTime
   
-  const localMatchTime = getMatchTime(matchStartTs)
-  const drift = localMatchTime - onChainTime
-  
-  // If drift is significant (>5 seconds), re-initialize
   if (Math.abs(drift) > 5) {
-    console.warn(`Significant time drift detected: ${drift.toFixed(2)}s. Re-syncing...`)
-    matchStartLocalTime = Date.now() / 1000
+    console.warn(`Clock drift detected: ${drift.toFixed(2)}s - check system time`)
   }
   
   return drift

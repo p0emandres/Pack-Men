@@ -1,4 +1,5 @@
 import type { MatchState } from '../types/index.js'
+import type { ServerResponse } from 'http'
 
 /**
  * In-memory session store for active peer sessions and matches.
@@ -24,6 +25,9 @@ class SessionStore {
 
   // Map of peerId -> privyUserId (for quick lookup)
   private peerToUser = new Map<string, string>()
+
+  // Map of matchId -> Set of SSE connections (ServerResponse)
+  private sseConnections = new Map<string, Set<ServerResponse>>()
 
   /**
    * Register an active session.
@@ -187,8 +191,14 @@ class SessionStore {
     }
 
     // Add to ready players if not already ready
-    if (!match.readyPlayers.includes(privyUserId)) {
+    const wasAlreadyReady = match.readyPlayers.includes(privyUserId)
+    if (!wasAlreadyReady) {
       match.readyPlayers.push(privyUserId)
+    }
+
+    // Emit SSE update if state changed
+    if (!wasAlreadyReady) {
+      this.emitMatchUpdate(matchId)
     }
 
     return true
@@ -220,6 +230,88 @@ class SessionStore {
       if (session.expiresAt * 1000 < now) {
         this.revokeSession(userId)
       }
+    }
+  }
+
+  /**
+   * Add SSE connection for a match.
+   */
+  addSSEConnection(matchId: string, response: ServerResponse): void {
+    if (!this.sseConnections.has(matchId)) {
+      this.sseConnections.set(matchId, new Set())
+    }
+    this.sseConnections.get(matchId)!.add(response)
+
+    // Clean up connection on close
+    response.on('close', () => {
+      this.removeSSEConnection(matchId, response)
+    })
+  }
+
+  /**
+   * Remove SSE connection for a match.
+   */
+  removeSSEConnection(matchId: string, response: ServerResponse): void {
+    const connections = this.sseConnections.get(matchId)
+    if (connections) {
+      connections.delete(response)
+      if (connections.size === 0) {
+        this.sseConnections.delete(matchId)
+      }
+    }
+  }
+
+  /**
+   * Emit match update to all SSE connections for a match.
+   */
+  emitMatchUpdate(matchId: string): void {
+    const connections = this.sseConnections.get(matchId)
+    if (!connections || connections.size === 0) {
+      return
+    }
+
+    const match = this.matches.get(matchId)
+    if (!match) {
+      return
+    }
+
+    // Prepare match status data
+    const allReady = match.participants.length === match.readyPlayers.length && 
+                     match.participants.every(p => match.readyPlayers.includes(p))
+    
+    const matchStatus = {
+      matchId: match.matchId,
+      status: match.status,
+      participantCount: match.participants.length,
+      participants: match.participants,
+      createdAt: match.createdAt,
+      readyPlayers: match.readyPlayers || [],
+      allReady,
+      playerAWallet: match.playerAWallet,
+      playerBWallet: match.playerBWallet,
+    }
+
+    const data = JSON.stringify(matchStatus)
+    const message = `data: ${data}\n\n`
+
+    // Send to all connections
+    const deadConnections: ServerResponse[] = []
+    for (const response of connections) {
+      try {
+        if (!response.destroyed && !response.closed) {
+          response.write(message)
+        } else {
+          deadConnections.push(response)
+        }
+      } catch (error) {
+        // Connection is dead, mark for removal
+        deadConnections.push(response)
+      }
+    }
+
+    // Clean up dead connections
+    for (const deadConnection of deadConnections) {
+      this.removeSSEConnection(matchId, deadConnection)
     }
   }
 }

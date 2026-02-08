@@ -15,6 +15,7 @@
  */
 
 import * as THREE from 'three';
+import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { growSlotTracker, type SlotStatus } from './growSlotTracker';
 
 /**
@@ -48,15 +49,12 @@ function loadPromoTexture(): Promise<THREE.Texture> {
     return promoTextureLoadPromise;
   }
 
-  console.log('[GrowSlotIndicators] Starting to load promo.png...');
-
   promoTextureLoadPromise = new Promise((resolve, reject) => {
     const loader = new THREE.TextureLoader();
     loader.load(
       '/promo.png',
       (texture) => {
         promoTexture = texture;
-        console.log('[GrowSlotIndicators] Promo texture loaded successfully');
         resolve(promoTexture);
       },
       undefined,
@@ -127,30 +125,17 @@ function calculateSlotPositions(
         
         // EXPLICITLY exclude section 6 (Green Widow Kush) - sectionNumber 7
         if (sectionIndex === EXCLUDED_SECTION || sectionNumber === 7) {
-          if (import.meta.env.DEV) {
-            console.log(`[GrowSlotIndicators] Excluding pot from section 6 (Green Widow Kush): ${child.name} at (${worldPosition.x.toFixed(1)}, ${worldPosition.z.toFixed(1)})`);
-          }
           return; // Skip section 6 completely
         }
         
         // Only include sections 0-5 (sectionNumbers 1-6)
         if (sectionIndex >= 0 && sectionIndex <= 5 && sectionNumber >= 1 && sectionNumber <= 6) {
           potData.push({ position: worldPosition, sectionIndex });
-          if (import.meta.env.DEV) {
-            const strainNames = ['Blackberry Kush', 'White Widow', 'Green Crack', 'Blackberry Widow', 'White Crack', 'Green Kush'];
-            console.log(`[GrowSlotIndicators] Including pot: Section${sectionNumber} (index ${sectionIndex}) = ${strainNames[sectionIndex]} at (${worldPosition.x.toFixed(1)}, ${worldPosition.z.toFixed(1)})`);
-          }
         }
       }
     }
   });
   
-  if (import.meta.env.DEV) {
-    console.log(`[GrowSlotIndicators] Found ${potData.length} pots from target sections (0-5) for room ${roomId}`);
-    console.log(`[GrowSlotIndicators] All pots found:`, allPotsFound.map(p => 
-      `Section${p.sectionIndex + 1} (idx ${p.sectionIndex}) at (${p.position.x.toFixed(1)}, ${p.position.z.toFixed(1)})`
-    ).join(', '));
-  }
   
   // Group pots by section and get one pot from each target section
   // We want one indicator per section, so get the first pot from each section
@@ -189,13 +174,6 @@ function calculateSlotPositions(
     console.error(`[GrowSlotIndicators] ERROR: Found ${section6Pots.length} section 6 pots in potData! They should have been filtered out.`);
   }
   
-  if (import.meta.env.DEV) {
-    console.log(`[GrowSlotIndicators] Mapped sections to indicators:`, 
-      Array.from(sectionPots.entries()).map(([section, pos]) => 
-        `Section ${section} -> position (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`
-      ).join(', ')
-    );
-  }
   
   // Map slot indices (0-5) to section pot positions
   // Slot 0 -> Section 0 (Blackberry Kush)
@@ -215,22 +193,12 @@ function calculateSlotPositions(
       // Slot 3 (Blackberry Widow): Use section 6's pot position for indicator
       if (section6PotPosition) {
         potPosition = section6PotPosition;
-        if (import.meta.env.DEV) {
-          console.log(`[GrowSlotIndicators] Mapped Slot 3 (Blackberry Widow) -> Section 6 pot at (${potPosition.x.toFixed(1)}, ${potPosition.z.toFixed(1)})`);
-        }
-      } else {
-        console.warn(`[GrowSlotIndicators] WARNING: No section 6 pot found for Slot 3 (Blackberry Widow) indicator position`);
       }
     } else {
       // All other slots: Use their corresponding section's pot position
       const sectionIndex = slotIndex;
       if (sectionPots.has(sectionIndex)) {
         potPosition = sectionPots.get(sectionIndex)!;
-        if (import.meta.env.DEV) {
-          console.log(`[GrowSlotIndicators] Mapped Slot ${slotIndex} (${strainNames[slotIndex]}) -> Section ${sectionIndex} pot at (${potPosition.x.toFixed(1)}, ${potPosition.z.toFixed(1)})`);
-        }
-      } else {
-        console.warn(`[GrowSlotIndicators] WARNING: No pot found for Slot ${slotIndex} (${strainNames[slotIndex]}, Section ${sectionIndex})`);
       }
     }
     
@@ -239,20 +207,6 @@ function calculateSlotPositions(
     }
   }
   
-  // Verify slot 3 (Blackberry Widow) is mapped correctly
-  if (!slotToSectionMap[3]) {
-    console.error(`[GrowSlotIndicators] CRITICAL ERROR: Slot 3 (Blackberry Widow) has no pot position!`);
-    if (section6PotPosition) {
-      console.error(`[GrowSlotIndicators] Section 6 pot exists at (${section6PotPosition.x.toFixed(1)}, ${section6PotPosition.z.toFixed(1)}) but wasn't used`);
-    } else {
-      console.error(`[GrowSlotIndicators] Section 6 pot not found`);
-    }
-  } else {
-    const pos = slotToSectionMap[3]!;
-    if (import.meta.env.DEV) {
-      console.log(`[GrowSlotIndicators] ✓ Slot 3 (Blackberry Widow) mapped to Section 6 pot at (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)})`);
-    }
-  }
   
   // Determine which side of origin to place indicators on
   // Check if pots are mostly on west (negative X) or east (positive X) side
@@ -299,11 +253,6 @@ function calculateSlotPositions(
     
     // Raise by 0.3 units on Y axis
     indicatorPos.y += 0.3;
-    
-    if (import.meta.env.DEV) {
-      const sourceSection = slotIndex === 3 ? 6 : slotIndex;
-      console.log(`[GrowSlotIndicators] Slot ${slotIndex} (${strainNames[slotIndex]}) -> Section ${sourceSection} pot at (${potPos.x.toFixed(1)}, ${potPos.z.toFixed(1)}) -> Indicator at (${indicatorPos.x.toFixed(1)}, ${indicatorPos.y.toFixed(1)}, ${indicatorPos.z.toFixed(1)})`);
-    }
     
     positions.push(indicatorPos);
   }
@@ -366,12 +315,13 @@ function createSlotIndicator(slotIndex: number, position: THREE.Vector3, texture
   group.add(promoPlane);
 
   // Add a 2D circle indicator on the ground (filled disc)
+  // Initial color is cyan (empty state) - will be updated based on slot status
   const circleGeometry = new THREE.CircleGeometry(INDICATOR_CONFIG.groundCircleRadius, 32);
   const circleMaterial = new THREE.MeshBasicMaterial({
-    color: INDICATOR_CONFIG.color,
+    color: 0x22d3ee, // Cyan/Teal for empty slots - updated dynamically
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.4,
+    opacity: 0.35,
     depthWrite: false,
   });
   const groundCircle = new THREE.Mesh(circleGeometry, circleMaterial);
@@ -382,16 +332,17 @@ function createSlotIndicator(slotIndex: number, position: THREE.Vector3, texture
   group.add(groundCircle);
 
   // Add a ring outline for better visibility
+  // Ring around the ground circle - initial color is cyan (empty state)
   const ringGeometry = new THREE.RingGeometry(
     INDICATOR_CONFIG.groundCircleRadius - 0.2,
     INDICATOR_CONFIG.groundCircleRadius,
     32
   );
   const ringMaterial = new THREE.MeshBasicMaterial({
-    color: INDICATOR_CONFIG.color,
+    color: 0x22d3ee, // Cyan/Teal for empty slots - updated dynamically
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.7,
     depthWrite: false,
   });
   const groundRing = new THREE.Mesh(ringGeometry, ringMaterial);
@@ -401,11 +352,34 @@ function createSlotIndicator(slotIndex: number, position: THREE.Vector3, texture
   groundRing.name = `GroundRing_Slot_${slotIndex}`;
   group.add(groundRing);
 
-  // Store metadata
+  // Create timer label element (CSS2DObject for text display above indicator)
+  const timerLabelDiv = document.createElement('div');
+  timerLabelDiv.className = 'grow-slot-timer-label';
+  timerLabelDiv.style.fontSize = '14px';
+  timerLabelDiv.style.fontWeight = 'bold';
+  timerLabelDiv.style.fontFamily = 'monospace';
+  timerLabelDiv.style.color = '#fbbf24'; // Yellow/Orange to match growing indicator color
+  timerLabelDiv.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(251, 191, 36, 0.5)';
+  timerLabelDiv.style.pointerEvents = 'none';
+  timerLabelDiv.style.userSelect = 'none';
+  timerLabelDiv.style.whiteSpace = 'nowrap';
+  timerLabelDiv.style.textAlign = 'center';
+  timerLabelDiv.style.display = 'none'; // Hidden by default, shown when plant is growing
+  timerLabelDiv.textContent = '00:00';
+
+  // Create CSS2DObject for timer label
+  const timerLabel = new CSS2DObject(timerLabelDiv);
+  timerLabel.position.set(0, 3.5, 0); // Position above indicator (3.5 units up)
+  timerLabel.name = `TimerLabel_Slot_${slotIndex}`;
+  group.add(timerLabel);
+
+  // Store metadata and timer label references
   group.userData = {
     slotIndex,
     isGrowSlotIndicator: true,
     interactionRadius: INDICATOR_CONFIG.groundCircleRadius + 1.0, // Slightly larger than visual
+    timerLabel,
+    timerLabelDiv,
   };
 
   return {
@@ -473,7 +447,6 @@ export class GrowSlotIndicatorManager {
     }
 
     this._isInitialized = true;
-    console.log(`[GrowSlotIndicatorManager] Initialized for room ${roomId} with ${this.indicators.size} indicators`);
   }
 
   /**
@@ -496,21 +469,54 @@ export class GrowSlotIndicatorManager {
    */
   private animationTime = 0;
 
+  // Track last known state for each slot to detect changes
+  private lastKnownState: Map<number, { occupied: boolean; isReady: boolean; isGrowing: boolean }> = new Map();
+
+  // Track frame count for periodic logging
+  private frameCount = 0;
+
   update(deltaTime: number): void {
     this.animationTime += deltaTime;
+    this.frameCount++;
 
-      // Update visual state based on slot status
-      for (const indicator of this.indicators.values()) {
-        if (!indicator.group.visible) continue;
+    // Update visual state based on slot status
+    for (const indicator of this.indicators.values()) {
+      if (!indicator.group.visible) {
+        continue;
+      }
 
-        const slotStatus = growSlotTracker.getSlotStatus(indicator.slotIndex);
-        const isOccupied = slotStatus?.occupied ?? false;
-        const isReady = slotStatus?.isReady ?? false;
-        const isHarvested = slotStatus?.harvested ?? false;
-        
-        // After harvest, slot should be empty (occupied = false)
-        // If slot is not occupied, it's available for planting regardless of harvested flag
-        const isEmpty = !isOccupied;
+      const slotStatus = growSlotTracker.getSlotStatus(indicator.slotIndex);
+      const isOccupied = slotStatus?.occupied ?? false;
+      const isReady = slotStatus?.isReady ?? false;
+      const isHarvested = slotStatus?.harvested ?? false;
+      const isGrowing = slotStatus?.isGrowing ?? false;
+      const timeUntilReady = slotStatus?.timeUntilReady ?? 0;
+      
+      // After harvest, slot should be empty (occupied = false)
+      // If slot is not occupied, it's available for planting regardless of harvested flag
+      const isEmpty = !isOccupied;
+
+      // Track state changes (for internal logic only, no logging)
+      this.lastKnownState.set(indicator.slotIndex, { occupied: isOccupied, isReady, isGrowing });
+
+        // Update timer label visibility and text
+        const timerLabelDiv = indicator.group.userData.timerLabelDiv as HTMLElement | undefined;
+        if (timerLabelDiv) {
+          // Show timer only when plant is growing (occupied, not ready, not empty)
+          const shouldShowTimer = isOccupied && isGrowing && !isReady && !isHarvested && timeUntilReady > 0;
+          
+          if (shouldShowTimer) {
+            // Format time as MM:SS
+            const minutes = Math.floor(timeUntilReady / 60);
+            const seconds = Math.floor(timeUntilReady % 60);
+            const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            timerLabelDiv.textContent = formattedTime;
+            timerLabelDiv.style.display = 'block';
+          } else {
+            // Hide timer when slot is empty, ready, or harvested
+            timerLabelDiv.style.display = 'none';
+          }
+        }
 
         // Update visual appearance based on state
         indicator.group.traverse((child) => {
@@ -534,23 +540,48 @@ export class GrowSlotIndicatorManager {
             }
           }
 
-        // Update ground circle opacity based on state
+        // Update ground circle opacity and color based on state
+        // Using distinct colors for each state to make transitions obvious:
+        // - Empty: Cyan/Teal (0x22d3ee) - clearly shows "available for planting"
+        // - Growing: Orange/Yellow (0xfbbf24) - work in progress
+        // - Ready: Bright Green (0x4ade80) - ready to harvest
         if (child.name.startsWith('GroundCircle_') && child instanceof THREE.Mesh) {
           const baseMaterial = child.material as THREE.MeshBasicMaterial;
+          
           if (isReady) {
-            baseMaterial.opacity = 0.4 + Math.sin(this.animationTime * 3) * 0.2;
-            baseMaterial.color.setHex(0x4ade80); // Green for ready
-          } else if (isOccupied && !isHarvested) {
-            baseMaterial.opacity = 0.4;
-            baseMaterial.color.setHex(0xfbbf24); // Yellow for growing
+            // Ready for harvest - bright green with pulsing
+            baseMaterial.opacity = 0.5 + Math.sin(this.animationTime * 4) * 0.3;
+            baseMaterial.color.setHex(0x4ade80); // Bright green
+          } else if (isOccupied && isGrowing) {
+            // Growing - orange/yellow with subtle pulse
+            baseMaterial.opacity = 0.4 + Math.sin(this.animationTime * 2) * 0.1;
+            baseMaterial.color.setHex(0xfbbf24); // Orange/Yellow
           } else if (isEmpty) {
-            // Empty slot (available for planting) - show green
-            baseMaterial.opacity = 0.4;
-            baseMaterial.color.setHex(INDICATOR_CONFIG.color); // Default green for empty
+            // Empty slot (available for planting) - cyan/teal
+            baseMaterial.opacity = 0.35;
+            baseMaterial.color.setHex(0x22d3ee); // Cyan/Teal - distinct from green
           } else {
             // Fallback: should not happen, but show as empty
-            baseMaterial.opacity = 0.4;
-            baseMaterial.color.setHex(INDICATOR_CONFIG.color); // Default green for empty
+            baseMaterial.opacity = 0.35;
+            baseMaterial.color.setHex(0x22d3ee); // Cyan/Teal
+          }
+        }
+
+        // Update ground ring color to match circle (for consistent visual)
+        if (child.name.startsWith('GroundRing_') && child instanceof THREE.Mesh) {
+          const ringMaterial = child.material as THREE.MeshBasicMaterial;
+          if (isReady) {
+            ringMaterial.color.setHex(0x4ade80); // Bright green
+            ringMaterial.opacity = 0.9;
+          } else if (isOccupied && isGrowing) {
+            ringMaterial.color.setHex(0xfbbf24); // Orange/Yellow
+            ringMaterial.opacity = 0.9;
+          } else if (isEmpty) {
+            ringMaterial.color.setHex(0x22d3ee); // Cyan/Teal
+            ringMaterial.opacity = 0.7;
+          } else {
+            ringMaterial.color.setHex(0x22d3ee); // Cyan/Teal
+            ringMaterial.opacity = 0.7;
           }
         }
       });
@@ -598,6 +629,14 @@ export class GrowSlotIndicatorManager {
             child.material.dispose();
           }
         }
+        // Clean up CSS2DObject timer labels
+        if (child instanceof CSS2DObject && child.name.startsWith('TimerLabel_')) {
+          // CSS2DObject cleanup is handled automatically by Three.js
+          // but we can remove the element if needed
+          if (child.element && child.element.parentNode) {
+            child.element.parentNode.removeChild(child.element);
+          }
+        }
       });
     }
 
@@ -605,8 +644,6 @@ export class GrowSlotIndicatorManager {
     this._isInitialized = false;
     this.parentGroup = null;
     this.roomId = null;
-
-    console.log('[GrowSlotIndicatorManager] Destroyed');
   }
 }
 

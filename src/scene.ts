@@ -320,12 +320,6 @@ function buildRoadNetwork(tileSpacing: number, halfMapSize: number): void {
         }
     }
     
-    console.log(`Created road network with ${roadTiles.size} road tiles`);
-    // Log first few road tiles for debugging
-    const roadArray = Array.from(roadTiles);
-    if (roadArray.length > 0) {
-        console.log('Sample road tiles:', roadArray.slice(0, 5));
-    }
 }
 
 // Building footprints data
@@ -635,7 +629,6 @@ function distanceToPolygon(x: number, z: number, corners: { x: number; z: number
 // Function to place plants on green tiles
 function placePlantsOnGreenTiles(): void {
     if (plantModels.length === 0) {
-        console.log('No plant models loaded yet, skipping plant placement');
         return;
     }
     
@@ -672,7 +665,6 @@ function placePlantsOnGreenTiles(): void {
         }
     }
     
-    console.log(`Found ${greenTilePositions.length} green tiles for plant placement`);
     
     // Place plants on a percentage of green tiles (7.5% coverage for natural look)
     const plantDensity = 0.075;
@@ -723,7 +715,6 @@ function placePlantsOnGreenTiles(): void {
         plantsPlaced++;
     }
     
-    console.log(`Placed ${plantsPlaced} plants on green tiles`);
 }
 
 // Function to check if a tile should be green (park area) or grey (building/street area)
@@ -808,7 +799,6 @@ plantModelPaths.forEach((path) => {
             plantsLoaded++;
             
             if (plantsLoaded === totalPlants) {
-                console.log(`Loaded ${totalPlants} plant models`);
                 // If tiles are already created, place plants
                 if (groundTiles.length > 0) {
                     placePlantsOnGreenTiles();
@@ -816,9 +806,6 @@ plantModelPaths.forEach((path) => {
             }
         },
         (progress) => {
-            if (progress.total > 0) {
-                console.log(`Loading ${path}: ${(progress.loaded / progress.total * 100).toFixed(0)}%`);
-            }
         },
         (error) => {
             console.error(`Error loading ${path}:`, error);
@@ -860,9 +847,6 @@ loader.load(
         // Check the bounding box to understand model orientation
         const box = new THREE.Box3().setFromObject(baseTileModel);
         const size = box.getSize(new THREE.Vector3());
-        console.log('Base tile bounding box size:', size);
-        console.log('Base tile bounding box min:', box.min);
-        console.log('Base tile bounding box max:', box.max);
         
         // Build road network connecting buildings before creating tiles
         buildRoadNetwork(tileSpacing, halfMapSize);
@@ -891,9 +875,6 @@ loader.load(
                 // Debug: log first few road tiles to verify
                 if (roadTiles.size > 0 && groundTiles.length < 5) {
                     const tileKey = `${x.toFixed(6)},${z.toFixed(6)}`;
-                    if (roadTiles.has(tileKey)) {
-                        console.log(`Road tile found at (${x.toFixed(2)}, ${z.toFixed(2)})`);
-                    }
                 }
                 
                 // Apply material and settings to all meshes in the tile
@@ -915,15 +896,11 @@ loader.load(
             }
         }
         
-        console.log(`Created ${groundTiles.length} ground tiles using base.gltf`);
         
         // After tiles are created, place plants on green tiles
         placePlantsOnGreenTiles();
     },
     (progress) => {
-        if (progress.total > 0) {
-            console.log('Loading base.gltf progress:', (progress.loaded / progress.total * 100) + '%');
-        }
     },
     (error) => {
         console.error('Error loading base.gltf:', error);
@@ -950,7 +927,6 @@ const rotationSpeed = 5; // radians per second
 async function getCharacterModelPath(): Promise<string> {
     const identity = identityStore.getIdentity();
     
-    console.log(`[Character] Determining character model path. Identity available: ${!!identity}, matchId: ${identity?.matchId || 'none'}, privyUserId: ${identity?.privyUserId || 'none'}`);
     
     // Demo mode always uses Casual_Hoodie
     if (identity && identity.privyUserId.startsWith('demo-user')) {
@@ -960,7 +936,6 @@ async function getCharacterModelPath(): Promise<string> {
     
     // If no match ID, default to Casual_Hoodie
     if (!identity || !identity.matchId) {
-        console.log('[Character] No match ID, defaulting to Casual_Hoodie');
         return '/buildings/character/Casual_Hoodie.gltf';
     }
     
@@ -969,7 +944,6 @@ async function getCharacterModelPath(): Promise<string> {
         const apiBaseUrl = import.meta.env.VITE_API_URL || '';
         const matchUrl = apiBaseUrl ? `${apiBaseUrl}/api/match/${identity.matchId}` : `/api/match/${identity.matchId}`;
         
-        console.log(`[Character] Fetching match data from: ${matchUrl}`);
         const headers: HeadersInit = {};
         if (identity.sessionJwt) {
             headers['Authorization'] = `Bearer ${identity.sessionJwt}`;
@@ -986,8 +960,6 @@ async function getCharacterModelPath(): Promise<string> {
         const data = await response.json();
         const participants: string[] = data.participants || [];
         
-        console.log(`[Character] Match participants: [${participants.map((p, i) => `Index ${i}: ${p}`).join(', ')}]`);
-        console.log(`[Character] Looking for player: ${identity.privyUserId}`);
         
         // Find player index in participants array
         const playerIndex = participants.indexOf(identity.privyUserId);
@@ -1002,7 +974,6 @@ async function getCharacterModelPath(): Promise<string> {
             ? '/buildings/character/Casual_Hoodie.gltf'
             : '/buildings/character/Casual_2.gltf';
         
-        console.log(`[Character] Player index: ${playerIndex} (${playerIndex === 0 ? 'Player 1 - Casual_Hoodie' : 'Player 2 - Casual_2'}), loading: ${characterPath}`);
         return characterPath;
     } catch (error) {
         console.error('[Character] Error determining character model:', error);
@@ -1129,17 +1100,12 @@ function loadCharacterModel(): void {
                 idleAction.play(); // Start with idle animation
             }
             
-            console.log('Animations loaded:', animations.map(a => a.name));
-            console.log('Walk animation:', walkAnim?.name || 'Not found');
-            console.log('Run animation:', runAnim?.name || 'Not found');
-            console.log('Idle animation:', idleAnim?.name || 'Not found');
         }
         
         // Hide character initially to prevent it from appearing at origin
         farmer.visible = false;
         scene.add(farmer);
         const characterName = characterPath.includes('Casual_2') ? 'Casual_2' : 'Casual_Hoodie';
-        console.log(`${characterName} character loaded successfully`);
         
         // Ensure rooms are created before trying to spawn
         createRoomsIfReady();
@@ -1148,9 +1114,6 @@ function loadCharacterModel(): void {
         spawnCharacterInRoom(1);
     },
     (progress) => {
-        if (progress.total > 0) {
-            console.log('Loading progress:', (progress.loaded / progress.total * 100) + '%');
-        }
     },
     (error) => {
         console.error(`Error loading ${characterPath}:`, error);
@@ -1183,7 +1146,6 @@ function loadCharacterModel(): void {
             farmer.position.sub(center.multiply(farmer.scale));
             farmer.visible = false;
             scene.add(farmer);
-            console.log('Casual_Hoodie character loaded as fallback');
             createRoomsIfReady();
             spawnCharacterInRoom(1);
         });
@@ -1269,7 +1231,6 @@ loader.load(
         registerBuilding(building, '4Story_Wide_2Doors_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('4Story_Wide_2Doors_Mat building loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1317,7 +1278,6 @@ loader.load(
         registerBuilding(building, '4Story_Wide_2Doors_Roof_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('4Story_Wide_2Doors_Roof_Mat building loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1364,7 +1324,6 @@ loader.load(
         registerBuilding(building, '3Story_Balcony_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('3Story_Balcony_Mat building loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1412,7 +1371,6 @@ loader.load(
         registerBuilding(building, '3Story_Balcony_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('3Story_Balcony_Mat building (south) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1460,7 +1418,6 @@ loader.load(
         registerBuilding(building, '3Story_Slim_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('3Story_Slim_Mat building loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1508,7 +1465,6 @@ loader.load(
         registerBuilding(building, '3Story_Slim_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('3Story_Slim_Mat building (east) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1556,7 +1512,6 @@ loader.load(
         registerBuilding(building, '3Story_Small_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('3Story_Small_Mat building loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1604,7 +1559,6 @@ loader.load(
         registerBuilding(building, '3Story_Small_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('3Story_Small_Mat building (northeast, -45 degree offset) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1652,7 +1606,6 @@ loader.load(
         registerBuilding(building, '3Story_Small_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('3Story_Small_Mat building (southeast, 45 degree offset) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1700,7 +1653,6 @@ loader.load(
         registerBuilding(building, '3Story_Small_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('3Story_Small_Mat building (southwest, 135 degree offset) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1748,7 +1700,6 @@ loader.load(
         registerBuilding(building, '2Story_Columns_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Columns_Mat building (diagonally aligned with northeast) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1796,7 +1747,6 @@ loader.load(
         registerBuilding(building, '2Story_Columns_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Columns_Mat building (diagonally aligned with southeast) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1844,7 +1794,6 @@ loader.load(
         registerBuilding(building, '2Story_Columns_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Columns_Mat building (diagonally aligned with southwest) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1892,7 +1841,6 @@ loader.load(
         registerBuilding(building, '2Story_Columns_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Columns_Mat building (diagonally aligned with northwest) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1940,7 +1888,6 @@ loader.load(
         registerBuilding(building, '2Story_2_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_2_Mat building (south side) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -1988,7 +1935,6 @@ loader.load(
         registerBuilding(building, '2Story_Sidehouse_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Sidehouse_Mat building (south side) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2036,7 +1982,6 @@ loader.load(
         registerBuilding(building, '2Story_2_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_2_Mat building (north side) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2084,7 +2029,6 @@ loader.load(
         registerBuilding(building, '2Story_Sidehouse_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Sidehouse_Mat building (north side) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2132,7 +2076,6 @@ loader.load(
         registerBuilding(building, '2Story_Wide_2Doors_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Wide_2Doors_Mat building (east side) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2180,7 +2123,6 @@ loader.load(
         registerBuilding(building, '2Story_Stairs_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Stairs_Mat building (east side) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2228,7 +2170,6 @@ loader.load(
         registerBuilding(building, '2Story_Wide_2Doors_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Wide_2Doors_Mat building (west side) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2276,7 +2217,6 @@ loader.load(
         registerBuilding(building, '2Story_Stairs_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('2Story_Stairs_Mat building (west side) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2339,7 +2279,6 @@ loader.load(
         mainMapGroup.add(indicator1);
         
         mainMapGroup.add(building);
-        console.log('1Story_GableRoof_Mat building (northeast corner) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2402,7 +2341,6 @@ loader.load(
         mainMapGroup.add(indicator2);
         
         mainMapGroup.add(building);
-        console.log('1Story_GableRoof_Mat building (southwest corner) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2450,7 +2388,6 @@ loader.load(
         registerBuilding(building, '1Story_Sign_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('1Story_Sign_Mat building (northwest corner) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2498,7 +2435,6 @@ loader.load(
         registerBuilding(building, '1Story_Sign_Mat', building.rotation.y, 8);
         
         mainMapGroup.add(building);
-        console.log('1Story_Sign_Mat building (southeast corner) loaded successfully');
     },
     (progress) => {
         if (progress.total > 0) {
@@ -2957,12 +2893,6 @@ function createRoom(roomId: number): THREE.Group {
         rightShelf.name = `Room_${roomId}_Shelf_South_Right`;
         roomGroup.add(rightShelf);
         
-        // Shelves added (log removed)
-        console.log(`  East shelf: (${eastShelfX.toFixed(2)}, ${eastShelf.position.y.toFixed(2)}, ${eastShelfZ.toFixed(2)})`);
-        console.log(`  West shelf: (${westShelfX.toFixed(2)}, ${westShelf.position.y.toFixed(2)}, ${westShelfZ.toFixed(2)})`);
-        console.log(`[SHELF] Added two perpendicular shelves on south wall:`);
-        console.log(`  Left shelf: (${leftShelfX.toFixed(2)}, ${leftShelf.position.y.toFixed(2)}, ${southWallZ.toFixed(2)})`);
-        console.log(`  Right shelf: (${rightShelfX.toFixed(2)}, ${rightShelf.position.y.toFixed(2)}, ${southWallZ.toFixed(2)})`);
     } else {
         console.warn(`[SHELF] Shelf model not loaded when creating Room ${roomId}`);
     }
@@ -3848,7 +3778,6 @@ function addCannabisToExistingPots(): void {
         });
     }
     
-    console.log('Added cannabis plants to existing pots');
 }
 
 // Function to add fans between pot sections
@@ -4102,9 +4031,6 @@ function addVentsToExistingRooms(): void {
         rightVent.name = `Room_${roomId}_Vent_North_Right`;
         roomGroup.add(rightVent);
         
-        // Vents added (log removed)
-        console.log(`  Left vent: (${leftVentX.toFixed(2)}, ${leftVent.position.y.toFixed(2)}, ${northWallZ.toFixed(2)})`);
-        console.log(`  Right vent: (${rightVentX.toFixed(2)}, ${rightVent.position.y.toFixed(2)}, ${northWallZ.toFixed(2)})`);
     }
 }
 
@@ -4298,12 +4224,6 @@ function addShelvesToExistingRooms(): void {
         rightShelf.name = `Room_${roomId}_Shelf_South_Right`;
         roomGroup.add(rightShelf);
         
-        // Shelves added (log removed)
-        console.log(`  East shelf: (${eastShelfX.toFixed(2)}, ${eastShelf.position.y.toFixed(2)}, ${eastShelfZ.toFixed(2)})`);
-        console.log(`  West shelf: (${westShelfX.toFixed(2)}, ${westShelf.position.y.toFixed(2)}, ${westShelfZ.toFixed(2)})`);
-        console.log(`Added two perpendicular shelves on south wall:`);
-        console.log(`  Left shelf: (${leftShelfX.toFixed(2)}, ${leftShelf.position.y.toFixed(2)}, ${southWallZ.toFixed(2)})`);
-        console.log(`  Right shelf: (${rightShelfX.toFixed(2)}, ${rightShelf.position.y.toFixed(2)}, ${southWallZ.toFixed(2)})`);
     }
 }
 
@@ -4523,7 +4443,6 @@ function getPlayerState(): { position: { x: number; y: number; z: number }; rota
 function enterCityScene(): void {
     const identity = identityStore.getIdentity();
     if (!identity) {
-        console.log('[CityScene] No identity, skipping city scene initialization');
         currentSceneType = 'city';
         return;
     }
@@ -4535,11 +4454,10 @@ function enterCityScene(): void {
     // For multiplayer: initialize with matchId (presence updates + availability-based indicators)
     if (!cityScene) {
         if (isDemoMode) {
-            console.log('[CityScene] Initializing city scene for demo mode');
+            // Demo mode
         } else if (identity.matchId) {
-            console.log('[CityScene] Initializing city scene for presence updates');
+            // Presence updates mode
         } else {
-            console.log('[CityScene] No match ID, skipping city scene initialization');
             currentSceneType = 'city';
             return;
         }
@@ -4552,7 +4470,6 @@ function enterCityScene(): void {
     cityScene.enter();
 
     currentSceneType = 'city';
-    console.log('[CityScene] Entered city scene');
 }
 
 // Function to exit city scene (when entering grow room)
@@ -4565,7 +4482,6 @@ function exitCityScene(): void {
     
     if (currentSceneType === 'city') {
         currentSceneType = null;
-        console.log('[CityScene] Exited city scene');
     }
 }
 
@@ -4841,7 +4757,6 @@ function createDoorExitIndicator(roomId: number, doorLocalPosition?: THREE.Vecto
     roomData.doorExitIndicatorPosition = indicatorPosition;
     roomData.doorExitIndicatorRadius = radius;
     // Door exit indicator created (log removed)
-    console.log(`  Door position: (${finalDoorPosition.x.toFixed(2)}, ${finalDoorPosition.y.toFixed(2)}, ${finalDoorPosition.z.toFixed(2)}), Door rotation: ${finalDoorRotation.toFixed(2)}`);
     
     // Store reference for animation
     (indicatorGroup as any).pulseSpeed = 0.002;
@@ -4931,7 +4846,6 @@ function createEntranceIndicator(position: THREE.Vector3, rotation: number, room
     let roomData = rooms.get(roomId);
     if (!roomData) {
         // Room data doesn't exist yet, create placeholder (room group will be created when models load)
-        console.log(`Room ${roomId} data not found, creating placeholder...`);
         const placeholderGroup = new THREE.Group();
         placeholderGroup.name = `Room_${roomId}_Placeholder`;
         placeholderGroup.visible = false;
@@ -4949,7 +4863,6 @@ function createEntranceIndicator(position: THREE.Vector3, rotation: number, room
     // Store indicator position and radius
     roomData.indicatorPosition = indicatorPosition;
     roomData.indicatorRadius = radius;
-    console.log(`Entrance indicator created for Room ${roomId} at position (${indicatorPosition.x.toFixed(2)}, ${indicatorPosition.y.toFixed(2)}, ${indicatorPosition.z.toFixed(2)}) with radius ${radius}`);
     
     // Store reference for animation
     (indicatorGroup as any).pulseSpeed = 0.002;
@@ -5014,17 +4927,8 @@ function checkBuildingEntrance(): void {
     if (keys['e'] && !eKeyJustPressed) {
         eKeyJustPressed = true;
         
-        console.log(`Checking entrance - Total rooms: ${rooms.size}`);
         for (const [roomId, roomData] of rooms.entries()) {
-            console.log(`Room ${roomId} data:`, {
-                hasIndicatorPosition: !!roomData.indicatorPosition,
-                hasIndicatorRadius: !!roomData.indicatorRadius,
-                indicatorPosition: roomData.indicatorPosition,
-                indicatorRadius: roomData.indicatorRadius
-            });
-            
             if (!roomData.indicatorPosition || !roomData.indicatorRadius) {
-                console.log(`Room ${roomId}: Missing indicator data - Position: ${!!roomData.indicatorPosition}, Radius: ${!!roomData.indicatorRadius}`);
                 continue;
             }
             
@@ -5038,11 +4942,9 @@ function checkBuildingEntrance(): void {
                 Math.pow(playerX - indicatorX, 2) + Math.pow(playerZ - indicatorZ, 2)
             );
             
-            console.log(`Checking Room ${roomId}: Player at (${playerX.toFixed(2)}, ${playerZ.toFixed(2)}), Indicator at (${indicatorX.toFixed(2)}, ${indicatorZ.toFixed(2)}), Distance: ${distance.toFixed(2)}, Radius: ${roomData.indicatorRadius}`);
             
             // Check if player is within the indicator radius
             if (distance <= roomData.indicatorRadius) {
-                console.log(`Entering Room ${roomId}`);
                 enterRoom(roomId);
                 keys['e'] = false;
                 return;
@@ -5160,12 +5062,10 @@ loader.load(
     '/hq/Wall.glb',
     (gltf) => {
         wallModel = gltf.scene;
-        console.log('Wall.glb loaded successfully');
         createRoomsIfReady();
     },
     (progress) => {
         if (progress.total > 0) {
-            console.log('Loading Wall.glb progress:', (progress.loaded / progress.total * 100) + '%');
         }
     },
     (error) => {
@@ -5178,12 +5078,10 @@ loader.load(
     '/hq/Wood_floor.glb',
     (gltf) => {
         floorModel = gltf.scene;
-        console.log('Wood_floor.glb loaded successfully');
         createRoomsIfReady();
     },
     (progress) => {
         if (progress.total > 0) {
-            console.log('Loading Wood_floor.glb progress:', (progress.loaded / progress.total * 100) + '%');
         }
     },
     (error) => {
@@ -5196,14 +5094,12 @@ loader.load(
     '/hq/grow_light.glb',
     (gltf) => {
         growLightModel = gltf.scene;
-        console.log('grow_light.glb loaded successfully');
         createRoomsIfReady();
         // Add grow lights to existing rooms if they were created before grow light model loaded
         addGrowLightsToExistingRooms();
     },
     (progress) => {
         if (progress.total > 0) {
-            console.log('Loading grow_light.glb progress:', (progress.loaded / progress.total * 100) + '%');
         }
     },
     (error) => {
@@ -5216,14 +5112,12 @@ loader.load(
     '/hq/pot.glb',
     (gltf) => {
         potModel = gltf.scene;
-        console.log('pot.glb loaded successfully');
         createRoomsIfReady();
         // Add pots to existing rooms if they were created before pot model loaded
         addPotsToExistingRooms();
     },
     (progress) => {
         if (progress.total > 0) {
-            console.log('Loading pot.glb progress:', (progress.loaded / progress.total * 100) + '%');
         }
     },
     (error) => {
@@ -5236,13 +5130,11 @@ loader.load(
     '/hq/cannabis.glb',
     (gltf) => {
         cannabisModel = gltf.scene;
-        console.log('cannabis.glb loaded successfully');
         // Add cannabis to existing pots if they were created before cannabis model loaded
         addCannabisToExistingPots();
     },
     (progress) => {
         if (progress.total > 0) {
-            console.log('Loading cannabis.glb progress:', (progress.loaded / progress.total * 100) + '%');
         }
     },
     (error) => {
@@ -5255,14 +5147,12 @@ loader.load(
     '/hq/Door.glb',
     (gltf) => {
         doorModel = gltf.scene;
-        console.log('Door.glb loaded successfully');
         createRoomsIfReady();
         // Add doors to existing rooms if they were created before door model loaded
         addDoorsToExistingRooms();
     },
     (progress) => {
         if (progress.total > 0) {
-            console.log('Loading Door.glb progress:', (progress.loaded / progress.total * 100) + '%');
         }
     },
     (error) => {
@@ -5275,14 +5165,12 @@ loader.load(
     '/hq/shelf.glb',
     (gltf) => {
         shelfModel = gltf.scene;
-        console.log('shelf.glb loaded successfully');
         createRoomsIfReady();
         // Add shelves to existing rooms if they were created before shelf model loaded
         addShelvesToExistingRooms();
     },
     (progress) => {
         if (progress.total > 0) {
-            console.log('Loading shelf.glb progress:', (progress.loaded / progress.total * 100) + '%');
         }
     },
     (error) => {
@@ -5295,14 +5183,12 @@ loader.load(
     '/hq/Fan.glb',
     (gltf) => {
         fanModel = gltf.scene;
-        console.log('Fan.glb loaded successfully');
         createRoomsIfReady();
         // Add fans to existing rooms if they were created before fan model loaded
         addFansToExistingRooms();
     },
     (progress) => {
         if (progress.total > 0) {
-            console.log('Loading Fan.glb progress:', (progress.loaded / progress.total * 100) + '%');
         }
     },
     (error) => {
@@ -5315,14 +5201,12 @@ loader.load(
     '/hq/Vent.glb',
     (gltf) => {
         ventModel = gltf.scene;
-        console.log('Vent.glb loaded successfully');
         createRoomsIfReady();
         // Add vents to existing rooms if they were created before vent model loaded
         addVentsToExistingRooms();
     },
     (progress) => {
         if (progress.total > 0) {
-            console.log('Loading Vent.glb progress:', (progress.loaded / progress.total * 100) + '%');
         }
     },
     (error) => {
@@ -5335,12 +5219,6 @@ const axesHelper = new THREE.AxesHelper(5);
 scene.add(axesHelper);
 
 // Log keyboard shortcuts
-console.log('\n=== KEYBOARD SHORTCUTS ===');
-console.log('B - Print building positions and areas');
-console.log('J - Export building data as JSON (main map only)');
-console.log('E - Enter room (stand on indicator and press E) / Exit room (when in room)');
-console.log('C - Toggle camera mode (follow/free)');
-console.log('Stand on green circle indicators and press E to enter rooms\n');
 
 // Keyboard input handling
 window.addEventListener('keydown', (event) => {
@@ -5358,14 +5236,10 @@ window.addEventListener('keydown', (event) => {
     // Export building data with 'j' key (only when in main map)
     if (event.key.toLowerCase() === 'j' && currentRoomId === null) {
         const jsonData = buildingTracker.exportToJSON();
-        console.log('\n=== EXPORTED BUILDING DATA (JSON) ===\n');
-        console.log(jsonData);
         // Also copy to clipboard if possible
         if (navigator.clipboard) {
             navigator.clipboard.writeText(jsonData).then(() => {
-                console.log('\n✓ Data copied to clipboard!');
             }).catch(() => {
-                console.log('\n⚠ Could not copy to clipboard');
             });
         }
     }
@@ -5379,7 +5253,6 @@ window.addEventListener('keydown', (event) => {
             controls.enableZoom = true;
             controls.minDistance = 1;
             controls.maxDistance = 500;
-            console.log('Camera mode: FREE (zoom and drag enabled)');
         } else {
             // Return to character follow mode - disable zoom and lock distance
             controls.enableZoom = false;
@@ -5404,7 +5277,6 @@ window.addEventListener('keydown', (event) => {
                 
                 controls.update();
             }
-            console.log('Camera mode: FOLLOWING CHARACTER');
         }
     }
 });
@@ -5624,7 +5496,6 @@ export function initScene(identity: PlayerIdentity, container: HTMLElement): voi
     // Load character model now that identity is available
     // This ensures we have matchId and can determine the correct character
     if (!farmer && !characterLoadAttempted) {
-        console.log('[Character] Loading character model with identity available');
         loadCharacterModel();
     }
     
@@ -5648,7 +5519,6 @@ export function initScene(identity: PlayerIdentity, container: HTMLElement): voi
     // Initialize city scene early for multiplayer mode to receive presence updates
     // This allows players to see each other even when one is in a room
     if (!isDemoMode && identity.matchId && !cityScene) {
-        console.log('[CityScene] Pre-initializing city scene for multiplayer presence');
         cityScene = new CityScene(scene, camera, renderer, mainMapGroup, identity);
         cityScene.initialize(getPlayerState);
         // Don't enter city scene yet - player will spawn in room first
@@ -5669,7 +5539,6 @@ export function initScene(identity: PlayerIdentity, container: HTMLElement): voi
         // If player is already in a room, that means spawnCharacterInRoom succeeded earlier
         if (currentRoomId !== null) {
             hasInitialSpawned = true; // Mark that initial spawn has happened
-            console.log(`[SPAWN] Player already in room ${currentRoomId} (spawned via direct call)`);
             return true; // Successfully spawned via direct call
         }
         
@@ -5682,10 +5551,8 @@ export function initScene(identity: PlayerIdentity, container: HTMLElement): voi
         const roomReady = room && !room.roomGroup.name.includes('Placeholder');
         const notInRoom = currentRoomId === null;
         
-        console.log(`[SPAWN CHECK] farmer: ${hasFarmer}, room exists: ${hasRoom}, room ready: ${roomReady}, not in room: ${notInRoom}, hasInitialSpawned: ${hasInitialSpawned}`);
         
         if (hasFarmer && hasRoom && roomReady && notInRoom) {
-            console.log(`[SPAWN] All conditions met, spawning in room ${roomId}`);
             spawnCharacterInRoom(roomId);
             hasInitialSpawned = true; // Mark that initial spawn has happened
             return true; // Successfully spawned
@@ -5697,7 +5564,6 @@ export function initScene(identity: PlayerIdentity, container: HTMLElement): voi
     if (isDemoMode) {
         // Demo mode detected (log removed)
     } else {
-        console.log('Multiplayer mode detected - will spawn in room 1 when ready');
     }
     
     // Try immediately
@@ -5708,7 +5574,6 @@ export function initScene(identity: PlayerIdentity, container: HTMLElement): voi
         const retryInterval = setInterval(() => {
             retryCount++;
             if (checkAndSpawnInRoom(1)) {
-                console.log(`Successfully spawned in room after ${retryCount} retries`);
                 clearInterval(retryInterval);
             } else if (retryCount >= maxRetries) {
                 console.warn(`Failed to spawn in room after ${maxRetries} retries. Character may spawn on main map.`);

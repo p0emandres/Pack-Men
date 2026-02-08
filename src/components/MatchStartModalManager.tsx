@@ -30,8 +30,13 @@ export function MatchStartModalManager() {
   const [playerAWallet, setPlayerAWallet] = useState<string | null>(null)
   const [playerBWallet, setPlayerBWallet] = useState<string | null>(null)
   const [matchStarted, setMatchStarted] = useState(false)
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
   const identityRef = useRef<PlayerIdentity | null>(null)
+  
+  // Track identity values for effect dependencies
+  const identity = identityStore.getIdentity()
+  const matchId = identity?.matchId || null
+  const sessionJwt = identity?.sessionJwt || null
 
   // Get local wallet address
   const getLocalWalletAddress = (): string | null => {
@@ -116,15 +121,22 @@ export function MatchStartModalManager() {
     return null
   }
 
-  // Poll match status and check if both players are ready
+  // Subscribe to match status updates via SSE
   useEffect(() => {
-    const identity = identityStore.getIdentity()
-    identityRef.current = identity
+    const currentIdentity = identityStore.getIdentity()
+    identityRef.current = currentIdentity
 
-    // Only poll if we have a match ID
-    if (!identity?.matchId || !identity.sessionJwt) {
+    // Only subscribe if we have a match ID
+    if (!currentIdentity?.matchId || !currentIdentity.sessionJwt) {
       console.log('[MatchStartModalManager] No identity or matchId, skipping')
       return
+    }
+
+    // Close existing connection if any
+    if (eventSourceRef.current) {
+      console.log('[MatchStartModalManager] Closing existing SSE connection before creating new one')
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
     }
 
     const localWalletAddress = getLocalWalletAddress()
@@ -133,67 +145,68 @@ export function MatchStartModalManager() {
       return
     }
 
-    console.log('[MatchStartModalManager] Starting to poll match status for:', identity.matchId)
+    console.log('[MatchStartModalManager] Starting SSE subscription for match:', currentIdentity.matchId)
 
-    // Poll match status
-    const pollMatchStatus = async () => {
-      const matchStatus = await fetchMatchStatus(identity.matchId!, identity.sessionJwt!)
-      if (!matchStatus) {
-        return
-      }
+    // Create SSE connection
+    const apiBaseUrl = import.meta.env.VITE_API_URL || ''
+    const streamUrl = apiBaseUrl 
+      ? `${apiBaseUrl}/api/match/${currentIdentity.matchId}/stream?token=${encodeURIComponent(currentIdentity.sessionJwt)}`
+      : `/api/match/${currentIdentity.matchId}/stream?token=${encodeURIComponent(currentIdentity.sessionJwt)}`
+    
+    const eventSource = new EventSource(streamUrl)
+    eventSourceRef.current = eventSource
 
-      console.log('[MatchStartModalManager] Match status:', {
-        allReady: matchStatus.allReady,
-        participants: matchStatus.participants.length,
-        readyPlayers: matchStatus.readyPlayers.length,
-        hasPlayerAWallet: !!matchStatus.playerAWallet,
-        hasPlayerBWallet: !!matchStatus.playerBWallet,
-      })
-
-      // Check if both players are ready
-      if (matchStatus.allReady && matchStatus.participants.length === 2) {
-        // Get wallet addresses from server
-        const wallets = getPlayerWallets(matchStatus)
+    // Handle SSE messages
+    eventSource.onmessage = (event) => {
+      try {
+        const matchStatus: MatchStatus = JSON.parse(event.data)
         
-        if (wallets) {
-          const [playerA, playerB] = wallets
-          console.log('[MatchStartModalManager] ✓ Both players ready with wallets, showing modal', {
-            playerA,
-            playerB,
-          })
-          setPlayerAWallet(playerA)
-          setPlayerBWallet(playerB)
-          setBothPlayersReady(true)
+        console.log('[MatchStartModalManager] Received match status update:', matchStatus)
+
+        // Check if both players are ready
+        if (matchStatus.allReady && matchStatus.participants.length === 2) {
+          // Get wallet addresses from server
+          const wallets = getPlayerWallets(matchStatus)
+          
+          if (wallets) {
+            const [playerA, playerB] = wallets
+            setPlayerAWallet(playerA)
+            setPlayerBWallet(playerB)
+            setBothPlayersReady(true)
+          } else {
+            // Server hasn't derived wallet addresses yet
+            console.log('[MatchStartModalManager] Both players ready but waiting for server to derive wallet addresses')
+          }
         } else {
-          // Server hasn't derived wallet addresses yet - this happens when:
-          // 1. Both players haven't marked ready yet, OR
-          // 2. One or both players haven't provided wallet addresses yet
-          // Keep polling until wallet addresses are available
-          console.log('[MatchStartModalManager] Both players ready but waiting for server to derive wallet addresses')
+          // Not all players ready yet
+          console.log('[MatchStartModalManager] Not all players ready:', {
+            allReady: matchStatus.allReady,
+            participants: matchStatus.participants.length,
+            readyPlayers: matchStatus.readyPlayers.length,
+          })
         }
-      } else {
-        // Not all players ready yet
-        console.log('[MatchStartModalManager] Not all players ready:', {
-          allReady: matchStatus.allReady,
-          participants: matchStatus.participants.length,
-          readyPlayers: matchStatus.readyPlayers.length,
-        })
+      } catch (error) {
+        console.error('[MatchStartModalManager] Error parsing SSE message:', error)
       }
     }
 
-    // Poll immediately
-    pollMatchStatus()
-
-    // Set up polling interval (every 2 seconds)
-    pollingIntervalRef.current = setInterval(pollMatchStatus, 2000)
+    // Handle SSE errors
+    eventSource.onerror = (error) => {
+      console.error('[MatchStartModalManager] SSE error:', error)
+      // EventSource will automatically reconnect, but we can close and cleanup if needed
+      if (eventSource.readyState === EventSource.CLOSED) {
+        console.log('[MatchStartModalManager] SSE connection closed')
+      }
+    }
 
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-        pollingIntervalRef.current = null
+      if (eventSourceRef.current) {
+        console.log('[MatchStartModalManager] Closing SSE subscription')
+        eventSourceRef.current.close()
+        eventSourceRef.current = null
       }
     }
-  }, [user, solanaWallets])
+  }, [matchId, sessionJwt]) // Re-run when matchId or sessionJwt changes
 
   // Handle match started callback
   const handleMatchStarted = () => {

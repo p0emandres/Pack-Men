@@ -112,6 +112,61 @@ export class CopEntities {
       // Use Swat model as cop (already exists in the project)
       const modelPath = '/buildings/character/Swat.gltf'
       
+      this.loader.load(
+        modelPath,
+        (gltf) => {
+          this.copModel = gltf.scene
+          this.copAnimations = gltf.animations
+          
+          // Apply texture quality settings
+          if (this.renderer) {
+            applyTextureQuality(this.copModel, this.renderer)
+          }
+          
+          console.log('[CopEntities] Model loaded successfully')
+          resolve()
+        },
+        undefined,
+        (error) => {
+          console.error('[CopEntities] Failed to load cop model:', error)
+          reject(error)
+        }
+      )
+    })
+    
+    return this.modelLoadPromise
+  }
+
+  /**
+   * Set local player ID for targeting calculations.
+   */
+  setLocalPlayerId(playerId: string): void {
+    this.localPlayerId = playerId
+  }
+
+  /**
+   * Update player positions for targeting.
+   */
+  setPlayers(players: PlayerTarget[]): void {
+    this.players = players
+  }
+
+  /**
+   * Spawn cops based on current smell tier.
+   */
+  async spawnCopsForTier(tier: SmellTier): Promise<void> {
+    if (this.isDestroyed) return
+    if (!this.copModel) {
+      await this.initialize()
+    }
+    if (!this.copModel) return
+    
+    this.currentTier = tier
+    const tierConfig = SMELL_TIERS[tier]
+    const composition = tierConfig.composition
+    
+    // Determine which cops need to spawn
+    const toSpawn: { personality: CopPersonality; index: number }[] = []
     
     // Check each personality type
     for (let i = this.spawnedComposition.pinky; i < composition.pinky; i++) {
@@ -137,6 +192,117 @@ export class CopEntities {
     if (this.cops.size > 0) {
       copPhaseSystem.markCopsSpawned()
     }
+  }
+
+  /**
+   * Spawn a single cop with given personality.
+   */
+  private async spawnCop(personality: CopPersonality, index: number): Promise<void> {
+    if (!this.copModel) return
+    
+    // Find a valid spawn point
+    const spawnPoint = this.findValidSpawnPoint()
+    
+    // Clone the model
+    const group = SkeletonUtils.clone(this.copModel) as THREE.Group
+    group.position.copy(spawnPoint)
+    group.scale.setScalar(1.0)
+    
+    // Apply personality color
+    const color = COP_COLORS[personality]
+    group.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        const material = child.material as THREE.MeshStandardMaterial
+        if (material.isMeshStandardMaterial) {
+          material.color.setHex(color)
+          material.emissive.setHex(color)
+          material.emissiveIntensity = 0.2
+        }
+      }
+    })
+    
+    // Set up animations
+    let mixer: THREE.AnimationMixer | null = null
+    let walkAction: THREE.AnimationAction | null = null
+    let idleAction: THREE.AnimationAction | null = null
+    
+    if (this.copAnimations.length > 0) {
+      mixer = new THREE.AnimationMixer(group)
+      
+      // Find walk and idle animations
+      const walkClip = this.copAnimations.find(clip => 
+        clip.name.toLowerCase().includes('walk') || clip.name.toLowerCase().includes('run')
+      )
+      const idleClip = this.copAnimations.find(clip => 
+        clip.name.toLowerCase().includes('idle')
+      ) || this.copAnimations[0]
+      
+      if (walkClip) {
+        walkAction = mixer.clipAction(walkClip)
+      }
+      if (idleClip) {
+        idleAction = mixer.clipAction(idleClip)
+      }
+      
+      // Start with walk animation
+      if (walkAction) {
+        walkAction.play()
+      } else if (idleAction) {
+        idleAction.play()
+      }
+    }
+    
+    const id = `${personality}_${index}`
+    const cop: CopAgent = {
+      id,
+      personality,
+      instanceIndex: index,
+      group,
+      mixer,
+      walkAction,
+      idleAction,
+      currentTarget: spawnPoint.clone(),
+      currentSpeed: COP_BASE_SPEED,
+      position: spawnPoint.clone(),
+      rotation: 0,
+      isActive: true,
+    }
+    
+    this.cops.set(id, cop)
+    this.scene.add(group)
+    
+    console.log(`[CopEntities] Spawned ${personality} cop at`, spawnPoint.toArray())
+  }
+
+  /**
+   * Find a valid spawn point away from players.
+   */
+  private findValidSpawnPoint(): THREE.Vector3 {
+    // Shuffle spawn points
+    const shuffled = [...SPAWN_POINTS].sort(() => Math.random() - 0.5)
+    
+    for (const point of shuffled) {
+      let isValid = true
+      
+      // Check distance from all players
+      for (const player of this.players) {
+        const distance = point.distanceTo(player.position)
+        if (distance < MIN_SPAWN_DISTANCE) {
+          isValid = false
+          break
+        }
+      }
+      
+      if (isValid) {
+        return point.clone()
+      }
+    }
+    
+    // If no valid point, return random spawn point with offset
+    const randomPoint = shuffled[0].clone()
+    randomPoint.x += (Math.random() - 0.5) * 20
+    randomPoint.z += (Math.random() - 0.5) * 20
+    return randomPoint
   }
 
   /**
@@ -237,6 +403,15 @@ export class CopEntities {
   }
 
   /**
+   * Update cop animation mixer.
+   */
+  private updateCopAnimation(cop: CopAgent, deltaTime: number): void {
+    if (cop.mixer) {
+      cop.mixer.update(deltaTime)
+    }
+  }
+
+  /**
    * Check if cop captures any players.
    */
   private checkCaptures(cop: CopAgent, phase: CopPhase): void {
@@ -251,11 +426,16 @@ export class CopEntities {
           timestamp: Date.now(),
         }
         
-    return Array.from(this.cops.values()).map(cop => ({
-      id: cop.id,
-      personality: cop.personality,
-      position: cop.position.clone(),
-    }))
+        // Notify listeners
+        for (const listener of this.captureListeners) {
+          try {
+            listener(event)
+          } catch (error) {
+            console.error('[CopEntities] Error in capture listener:', error)
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -266,9 +446,19 @@ export class CopEntities {
   }
 
   /**
+   * Get all cops info for external use.
+   */
+  getAllCops(): { id: string; personality: CopPersonality; position: THREE.Vector3 }[] {
+    return Array.from(this.cops.values()).map(cop => ({
+      id: cop.id,
+      personality: cop.personality,
+      position: cop.position.clone(),
+    }))
+  }
+
+  /**
    * Spawn cops for demo mode.
    * Bypasses smell-based logic and force-spawns a fixed set of cops.
-   * Uses real cop mechanics but doesn't require on-chain grow state.
    */
   async spawnDemoCops(): Promise<void> {
     if (this.isDestroyed) return
@@ -279,10 +469,15 @@ export class CopEntities {
     }
     
     if (!this.copModel) {
+      await this.initialize()
+    }
+    
+    if (!this.copModel) {
+      console.warn('[CopEntities] Cannot spawn demo cops - model not loaded')
       return
     }
     
-    const demoCops = [
+    const demoCops: { personality: CopPersonality; index: number }[] = [
       { personality: 'BLINKY', index: 0 },
       { personality: 'PINKY', index: 0 },
       { personality: 'INKY', index: 0 },
@@ -300,4 +495,37 @@ export class CopEntities {
     if (this.cops.size > 0) {
       copPhaseSystem.markCopsSpawned()
     }
+  }
+
+  /**
+   * Add capture event listener.
+   */
+  addCaptureListener(listener: (event: CaptureEvent) => void): void {
+    this.captureListeners.push(listener)
+  }
+
+  /**
+   * Remove capture event listener.
+   */
+  removeCaptureListener(listener: (event: CaptureEvent) => void): void {
+    const index = this.captureListeners.indexOf(listener)
+    if (index !== -1) {
+      this.captureListeners.splice(index, 1)
+    }
+  }
+
+  /**
+   * Destroy and clean up.
+   */
+  destroy(): void {
+    this.isDestroyed = true
     
+    for (const cop of this.cops.values()) {
+      this.scene.remove(cop.group)
+      cop.mixer?.stopAllAction()
+    }
+    
+    this.cops.clear()
+    this.captureListeners = []
+  }
+}

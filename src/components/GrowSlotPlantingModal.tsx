@@ -26,18 +26,10 @@ export const GrowSlotPlantingModal: React.FC<GrowSlotPlantingModalProps> = ({
 }) => {
   const computedCurrentTs = getCurrentMatchTime(matchStartTs, currentTs);
   
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GrowSlotPlantingModal.tsx:27',message:'Planting modal time check',data:{matchStartTs,currentTs,computedCurrentTs,slotIndex},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
-  
   const canPlant = growSlotTracker.canPlant(computedCurrentTs);
   const canPlantLevel1 = growSlotTracker.canPlantStrainLevel(1, computedCurrentTs);
   const canPlantLevel2 = growSlotTracker.canPlantStrainLevel(2, computedCurrentTs);
   const canPlantLevel3 = growSlotTracker.canPlantStrainLevel(3, computedCurrentTs);
-  
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GrowSlotPlantingModal.tsx:32',message:'Planting modal canPlant results',data:{slotIndex,canPlant,canPlantLevel1,canPlantLevel2,canPlantLevel3},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
 
   const handleSelect = (strainLevel: 1 | 2 | 3) => {
     onPlant(slotIndex, strainLevel);

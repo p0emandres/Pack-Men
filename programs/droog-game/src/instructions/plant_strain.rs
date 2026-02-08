@@ -18,6 +18,7 @@ pub fn plant_strain(
 ) -> Result<()> {
     let clock = Clock::get()?;
     let current_ts = clock.unix_timestamp;
+    let current_slot = clock.slot;
     
     let grow_state = &mut ctx.accounts.grow_state;
     let match_state = &ctx.accounts.match_state;
@@ -60,12 +61,13 @@ pub fn plant_strain(
     require!(is_player_a || is_player_b, DroogError::InvalidPlayer);
     
     // Cache match_id and compute variant_id before mutable borrows
+    // Use slot number instead of timestamp for better entropy
     let match_id = grow_state.match_id;
     let variant_id = MatchGrowState::compute_variant_id(
         match_id,
         &player,
         slot_index,
-        current_ts,
+        current_slot,
     );
     
     let slots = if is_player_a {

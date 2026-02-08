@@ -9,7 +9,7 @@
     "build-anchor": "anchor build"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.30.1",
+    "@coral-xyz/anchor": "^0.32.0",
     "@privy-io/react-auth": "^3.12.0",
     "@solana-program/memo": "^0.10.0",
     "@solana-program/system": "^0.10.0",

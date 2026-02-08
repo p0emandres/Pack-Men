@@ -7,6 +7,7 @@ interface PlantGrowthDisplayProps {
   matchEndTs: number
   currentTs?: number
   onHarvest?: (slotIndex: number) => void
+  isPlanting?: Set<number>
 }
 
 /**
@@ -47,9 +48,11 @@ function getStrainLevelName(level: number): string {
 const GrowSlotCard: React.FC<{ 
   status: SlotStatus
   onHarvest?: () => void
+  isPlanting?: boolean
 }> = ({
   status,
   onHarvest,
+  isPlanting,
 }) => {
   const colorClass = getSlotColorClass(status)
   
@@ -66,9 +69,14 @@ const GrowSlotCard: React.FC<{
         </div>
         
         {(() => {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/987a5869-dff7-42fa-b5cf-a1057d98fb5e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PlantGrowthDisplay.tsx:68',message:'GrowSlotCard render decision',data:{slotIndex:status.slotIndex,occupied:status.occupied,harvested:status.harvested,isReady:status.isReady,strainLevel:status.strainLevel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-          // #endregion
+          if (isPlanting) {
+            return (
+              <div className="slot-planting-state">
+                <div className="planting-spinner"></div>
+                <span className="planting-text">Planting...</span>
+              </div>
+            )
+          }
           
           if (!status.occupied) {
             return (
@@ -223,44 +231,67 @@ export const PlantGrowthDisplay: React.FC<PlantGrowthDisplayProps> = ({
   matchEndTs,
   currentTs,
   onHarvest,
+  isPlanting,
 }) => {
   const [summary, setSummary] = useState<GrowStateSummary | null>(null)
+  const [stateVersion, setStateVersion] = useState(0)
 
   // Update grow slot tracker with match timing
   useEffect(() => {
     growSlotTracker.setMatchTiming(matchStartTs, matchEndTs)
   }, [matchStartTs, matchEndTs])
 
+  // Subscribe to grow state changes for immediate reactivity
+  useEffect(() => {
+    const unsubscribe = growSlotTracker.subscribe(() => {
+      setStateVersion(v => v + 1)
+    })
+    return unsubscribe
+  }, [])
+
   // Periodic update of summary
+  // IMPORTANT: Always use Date.now() for interval updates to ensure fresh timestamps
+  // The currentTs prop is only used for initial render, not ongoing updates
   useEffect(() => {
     const updateSummary = () => {
       try {
-        const now = getCurrentMatchTime(matchStartTs, currentTs)
+        // ALWAYS use fresh timestamp for ongoing updates - don't use stale currentTs prop
+        const now = Date.now() / 1000
         const newSummary = growSlotTracker.getSummary(now)
         
+        // Debug: log when summary changes significantly
         if (import.meta.env.DEV) {
-          console.log('[PlantGrowthDisplay] Summary update:', {
-            currentTs: now,
-            matchStartTs,
-            slotsCount: newSummary.slots.length,
-            occupiedSlots: newSummary.slots.filter(s => s.occupied).length,
-            availableSlots: newSummary.availableSlots,
-            growingSlots: newSummary.growingSlots,
-            readySlots: newSummary.readySlots,
-            totalSmell: newSummary.totalSmell,
-            inventory: newSummary.inventory,
-          })
+          console.log('[PlantGrowthDisplay] updateSummary: slots=', newSummary.slots.map(s => ({
+            slotIndex: s.slotIndex,
+            occupied: s.occupied,
+            isReady: s.isReady,
+            isGrowing: s.isGrowing
+          })))
         }
         
         setSummary(newSummary)
       } catch (error) {
         console.error('[PlantGrowthDisplay] Error updating summary:', error)
+        console.error('[PlantGrowthDisplay] Error stack:', error instanceof Error ? error.stack : 'No stack trace')
         // Still try to get a summary even if there's an error
         try {
           const fallbackSummary = growSlotTracker.getSummary()
           setSummary(fallbackSummary)
         } catch (fallbackError) {
           console.error('[PlantGrowthDisplay] Fallback summary also failed:', fallbackError)
+          console.error('[PlantGrowthDisplay] Fallback error stack:', fallbackError instanceof Error ? fallbackError.stack : 'No stack trace')
+          // Set error state instead of crashing
+          setSummary({
+            slots: [],
+            inventory: { level1: 0, level2: 0, level3: 0 },
+            totalSmell: 0,
+            availableSlots: 0,
+            growingSlots: 0,
+            readySlots: 0,
+            harvestedSlots: 0,
+            canPlant: false,
+            timeUntilEndgameLock: 0,
+          })
         }
       }
     }
@@ -269,7 +300,7 @@ export const PlantGrowthDisplay: React.FC<PlantGrowthDisplayProps> = ({
     const interval = setInterval(updateSummary, 1000) // Update every second
 
     return () => clearInterval(interval)
-  }, [matchStartTs, currentTs])
+  }, [matchStartTs, stateVersion]) // Removed currentTs from deps - we always use Date.now()
 
   // Handle harvest action
   const handleHarvest = useCallback((slotIndex: number) => {
@@ -284,6 +315,15 @@ export const PlantGrowthDisplay: React.FC<PlantGrowthDisplayProps> = ({
     return (
       <div className="plant-growth-display loading">
         <span>Loading grow state...</span>
+      </div>
+    )
+  }
+  
+  // Show error state if summary has no slots (indicates error)
+  if (summary.slots.length === 0 && summary.availableSlots === 0) {
+    return (
+      <div className="plant-growth-display error">
+        <span>Error loading grow state. Please refresh.</span>
       </div>
     )
   }
@@ -324,6 +364,7 @@ export const PlantGrowthDisplay: React.FC<PlantGrowthDisplayProps> = ({
               key={slot.slotIndex}
               status={slot}
               onHarvest={slot.isReady ? () => handleHarvest(slot.slotIndex) : undefined}
+              isPlanting={isPlanting?.has(slot.slotIndex)}
             />
           )
         })}
@@ -359,6 +400,14 @@ export const plantGrowthStyles = `
   justify-content: center;
   padding: 32px;
   opacity: 0.7;
+}
+
+.plant-growth-display.error {
+  display: flex;
+  justify-content: center;
+  padding: 32px;
+  color: #ef4444;
+  opacity: 0.8;
 }
 
 .display-header {
@@ -410,12 +459,14 @@ export const plantGrowthStyles = `
 }
 
 .grow-slot.slot-empty {
-  border-color: rgba(255, 255, 255, 0.1);
-  opacity: 0.6;
+  border-color: #22d3ee; /* Cyan/Teal to match 3D indicators */
+  opacity: 0.7;
+  border-style: dashed; /* Dashed border to clearly indicate "available" */
 }
 
 .grow-slot.slot-growing {
   border-color: #fbbf24;
+  border-style: solid;
 }
 
 .grow-slot.slot-ready {
@@ -452,7 +503,7 @@ export const plantGrowthStyles = `
   font-weight: bold;
 }
 
-.slot-empty-state, .slot-harvested-state {
+.slot-empty-state, .slot-harvested-state, .slot-planting-state {
   text-align: center;
   padding: 4px 0;
   display: flex;
@@ -460,6 +511,30 @@ export const plantGrowthStyles = `
   align-items: center;
   justify-content: center;
   min-height: 60px;
+}
+
+.slot-planting-state {
+  opacity: 0.8;
+}
+
+.planting-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(74, 222, 128, 0.3);
+  border-top-color: #4ade80;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 4px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.planting-text {
+  font-size: 8px;
+  color: #4ade80;
+  opacity: 0.8;
 }
 
 .empty-icon, .harvested-icon {

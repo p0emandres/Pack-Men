@@ -280,8 +280,6 @@ export async function matchRoutes(fastify: FastifyInstance) {
         const { walletAddress } = request.body || {}
         const privyUserId = (request as any).privyUserId
 
-        console.log(`[Ready Endpoint] Request received: matchId=${matchId}, privyUserId=${privyUserId}, walletAddress=${walletAddress}`)
-
         if (!matchId) {
           console.error('[Ready Endpoint] Missing matchId parameter')
           reply.code(400).send({
@@ -301,10 +299,6 @@ export async function matchRoutes(fastify: FastifyInstance) {
         }
 
         const match = sessionStore.getMatch(matchId)
-        console.log(`[Ready Endpoint] Match found: ${match ? 'yes' : 'no'}`)
-        if (match) {
-          console.log(`[Ready Endpoint] Match participants: ${JSON.stringify(match.participants)}, hostId: ${match.hostId}`)
-        }
         if (!match) {
           reply.code(404).send({
             error: 'Match not found',
@@ -326,12 +320,10 @@ export async function matchRoutes(fastify: FastifyInstance) {
         // Store wallet address if provided
         if (walletAddress) {
           match.participantWallets.set(privyUserId, walletAddress)
-          console.log(`[Ready Endpoint] Stored wallet address for ${privyUserId}: ${walletAddress}`)
         }
 
         const isParticipant = match.participants.includes(privyUserId)
         const isHost = match.hostId === privyUserId
-        console.log(`[Ready Endpoint] Authorization check: isParticipant=${isParticipant}, isHost=${isHost}`)
         if (!isParticipant && !isHost) {
           reply.code(403).send({
             error: 'Not authorized',
@@ -340,9 +332,7 @@ export async function matchRoutes(fastify: FastifyInstance) {
           return
         }
 
-        console.log(`[Ready Endpoint] Attempting to set ready status for user ${privyUserId}`)
         const success = sessionStore.setPlayerReady(matchId, privyUserId)
-        console.log(`[Ready Endpoint] setPlayerReady result: ${success}`)
         if (!success) {
           reply.code(400).send({
             error: 'Failed to set ready status',
@@ -371,10 +361,13 @@ export async function matchRoutes(fastify: FastifyInstance) {
         }
 
         // Derive playerAWallet and playerBWallet if both players are ready and we have wallet addresses
-        if (updatedMatch.participants.length === 2 && 
+        const walletsChanged = updatedMatch.participants.length === 2 && 
             updatedMatch.readyPlayers.length === 2 &&
             updatedMatch.participantWallets &&
-            updatedMatch.participantWallets.size === 2) {
+            updatedMatch.participantWallets.size === 2 &&
+            (!updatedMatch.playerAWallet || !updatedMatch.playerBWallet)
+        
+        if (walletsChanged) {
           const wallets: string[] = []
           for (const participantId of updatedMatch.participants) {
             const wallet = updatedMatch.participantWallets.get(participantId)
@@ -388,7 +381,8 @@ export async function matchRoutes(fastify: FastifyInstance) {
             wallets.sort()
             updatedMatch.playerAWallet = wallets[0]
             updatedMatch.playerBWallet = wallets[1]
-            console.log(`[Ready Endpoint] Derived player wallets: playerA=${wallets[0]}, playerB=${wallets[1]}`)
+            // Emit SSE update when wallets are derived
+            sessionStore.emitMatchUpdate(matchId)
           }
         }
 
@@ -400,6 +394,9 @@ export async function matchRoutes(fastify: FastifyInstance) {
           // Continue anyway, just set allReady to false
           allReady = false
         }
+
+        // Emit SSE update after setting ready status
+        sessionStore.emitMatchUpdate(matchId)
 
         return {
           success: true,
@@ -422,6 +419,92 @@ export async function matchRoutes(fastify: FastifyInstance) {
           details: process.env.NODE_ENV === 'development' ? errorMessage : 'An error occurred',
         })
       }
+    }
+  )
+
+  /**
+   * Server-Sent Events endpoint for match status updates.
+   * GET /api/match/:matchId/stream
+   * 
+   * Emits events when:
+   * - Player ready status changes
+   * - allReady becomes true
+   * - playerAWallet and playerBWallet are derived
+   */
+  fastify.get<{ Params: { matchId: string }; Querystring: { token?: string } }>(
+    '/:matchId/stream',
+    async (request, reply) => {
+      const { matchId } = request.params
+      const token = request.query.token
+
+      if (!token) {
+        reply.code(401).send({ error: 'Missing authentication token' })
+        return
+      }
+
+      // Verify token
+      let privyUserId: string
+      try {
+        const { getJWTService } = await import('../services/jwt.js')
+        const privyAppId = process.env.PRIVY_APP_ID
+        const privyAppSecret = process.env.PRIVY_APP_SECRET
+        if (!privyAppId || !privyAppSecret) {
+          reply.code(500).send({ error: 'Server configuration error' })
+          return
+        }
+
+        const jwtService = getJWTService(privyAppId, privyAppSecret)
+        const decoded = await jwtService.verifyToken(token)
+        privyUserId = decoded.userId
+      } catch (error) {
+        reply.code(401).send({ error: 'Invalid or expired token' })
+        return
+      }
+
+      // Verify user is in this match
+      const match = sessionStore.getMatch(matchId)
+      if (!match) {
+        reply.code(404).send({ error: 'Match not found' })
+        return
+      }
+
+      if (!match.participants.includes(privyUserId)) {
+        reply.code(403).send({ error: 'Not a participant in this match' })
+        return
+      }
+
+      // Set up SSE headers
+      reply.raw.setHeader('Content-Type', 'text/event-stream')
+      reply.raw.setHeader('Cache-Control', 'no-cache')
+      reply.raw.setHeader('Connection', 'keep-alive')
+      reply.raw.setHeader('X-Accel-Buffering', 'no') // Disable nginx buffering
+
+      // Send initial connection message
+      reply.raw.write(': connected\n\n')
+
+      // Add connection to store
+      sessionStore.addSSEConnection(matchId, reply.raw)
+
+      // Send initial match status
+      const allReady = match.participants.length === match.readyPlayers.length && 
+                      match.participants.every(p => match.readyPlayers.includes(p))
+      const initialData = {
+        matchId: match.matchId,
+        status: match.status,
+        participantCount: match.participants.length,
+        participants: match.participants,
+        createdAt: match.createdAt,
+        readyPlayers: match.readyPlayers || [],
+        allReady,
+        playerAWallet: match.playerAWallet,
+        playerBWallet: match.playerBWallet,
+      }
+      reply.raw.write(`data: ${JSON.stringify(initialData)}\n\n`)
+
+      // Handle client disconnect
+      request.raw.on('close', () => {
+        sessionStore.removeSSEConnection(matchId, reply.raw)
+      })
     }
   )
 }

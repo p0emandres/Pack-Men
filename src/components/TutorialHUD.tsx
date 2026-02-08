@@ -267,7 +267,7 @@ export function TutorialHUD({ isVisible = true }: TutorialHUDProps) {
     setState(demoTutorialManager.getState())
 
     // Subscribe to state changes
-    const unsubscribeState = demoTutorialManager.on('state-changed', (newState) => {
+    const unsubscribeState = demoTutorialManager.on('state-changed', (newState: TutorialState) => {
       setState(newState)
     })
 

@@ -11,8 +11,9 @@ import {
 } from '../game/matchCoordination'
 import { DroogGameClient as GameClient } from '../game/solanaClient'
 import type { MatchState } from '../game/solanaClient'
-import { initializeMatchTime } from '../game/timeUtils'
 import { growSlotTracker } from '../game/growSlotTracker'
+import { createMatchIdentity } from '../game/matchIdentity'
+import { createSolanaConnection, getSolanaConnectionUrls } from '../game/solanaConnection'
 
 interface MatchStartModalProps {
   /** Callback when match PDA is confirmed and modal should be dismissed */
@@ -177,8 +178,8 @@ export function MatchStartModal({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [status, setStatus] = useState<string>('')
   const [pdaExists, setPdaExists] = useState(false)
+  const accountSubscriptionRef = useRef<number | null>(null)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const subscriptionIdRef = useRef<number | null>(null)
   const hasSubmittedRef = useRef(false)
   const hasDismissedRef = useRef(false) // Track if we've already dismissed the modal
   const connectionRef = useRef<Connection | null>(null)
@@ -198,14 +199,17 @@ export function MatchStartModal({
     return null
   }
 
-  // Check if PDA exists and dismiss modal
+  // Check if both match PDA and grow state PDA exist and dismiss modal
   const checkPDAAndDismiss = async () => {
     // Prevent multiple calls
     if (hasDismissedRef.current) {
       return
     }
     
-    if (!matchId || !playerAWallet || !playerBWallet) return
+    if (!matchId || !playerAWallet || !playerBWallet) {
+      console.log('[MatchStartModal] checkPDAAndDismiss: Missing required params', { matchId: !!matchId, playerAWallet: !!playerAWallet, playerBWallet: !!playerBWallet })
+      return
+    }
 
     try {
       const localWalletAddress = getLocalWalletAddress()
@@ -221,9 +225,8 @@ export function MatchStartModal({
       // Reuse existing connection and client if available
       let solanaClient = solanaClientRef.current
       if (!solanaClient || !connectionRef.current) {
-        // Create Solana client for checking PDA
-        const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com'
-        const connection = new Connection(rpcUrl, 'confirmed')
+        // Create Solana client for checking PDA with proper WebSocket endpoint
+        const connection = createSolanaConnection('confirmed')
         connectionRef.current = connection
         
         // Use a dummy keypair for read-only operations
@@ -241,30 +244,171 @@ export function MatchStartModal({
         'confirmed'
       )
 
-      if (matchState) {
-        // Verify local wallet is one of the players
-        const isPlayerA = localWallet.equals(matchState.playerA)
-        const isPlayerB = localWallet.equals(matchState.playerB)
-        
-        if (isPlayerA || isPlayerB) {
-          // Convert BN to number (authoritative on-chain value)
-          const startTs = matchState.startTs.toNumber ? matchState.startTs.toNumber() : Number(matchState.startTs)
-          const endTs = matchState.endTs.toNumber ? matchState.endTs.toNumber() : Number(matchState.endTs)
-          // Initialize match time with on-chain startTs (authoritative)
-          initializeMatchTime(startTs)
-          // Initialize growSlotTracker timing immediately so 3D indicators work
-          growSlotTracker.setMatchTiming(startTs, endTs)
-          
-          // Mark as dismissed immediately to prevent duplicate calls
-          if (hasDismissedRef.current) {
-            return
-          }
-          hasDismissedRef.current = true
-          onMatchStarted()
-        }
+      if (!matchState) {
+        // Only log this occasionally to avoid spam (check every 5th call or so)
+        return // Match PDA doesn't exist yet
       }
+
+      console.log('[MatchStartModal] checkPDAAndDismiss: Match PDA found, checking dependent PDAs...')
+
+      // Verify local wallet is one of the players
+      const isPlayerA = localWallet.equals(matchState.playerA)
+      const isPlayerB = localWallet.equals(matchState.playerB)
+      
+      if (!isPlayerA && !isPlayerB) {
+        console.warn('[MatchStartModal] Local wallet is not a player in this match')
+        return
+      }
+
+      // CRITICAL: Check that BOTH grow state AND delivery state PDAs exist before dismissing
+      // Player A needs to sign initMatch, initGrowState, AND initDeliveryState
+      const matchIdentity = await createMatchIdentity(matchId)
+      const growState = await solanaClient.getGrowState(matchIdentity.u64, 'confirmed')
+      
+      if (!growState) {
+        // Grow state doesn't exist yet - Player A hasn't finished signing
+        console.log('[MatchStartModal] Match PDA exists but grow state PDA not found yet - waiting for Player A to finish signing')
+        setStatus('Waiting for Player A to finish initializing match (grow state)...')
+        
+        // Start polling for all PDAs if not already polling
+        if (pollingIntervalRef.current === null) {
+          console.log('[MatchStartModal] Starting polling for dependent PDAs (from checkPDAAndDismiss)...')
+          pollingIntervalRef.current = setInterval(async () => {
+            try {
+              if (!solanaClientRef.current || hasDismissedRef.current) {
+                if (pollingIntervalRef.current) {
+                  clearInterval(pollingIntervalRef.current)
+                  pollingIntervalRef.current = null
+                }
+                return
+              }
+              
+              const checkGrowState = await solanaClientRef.current.getGrowState(matchIdentity.u64, 'confirmed')
+              
+              if (!checkGrowState) {
+                return // Keep polling - grow state not ready yet
+              }
+              console.log('[MatchStartModal] Grow state PDA detected')
+              
+              // Also check delivery state
+              const checkDeliveryState = await solanaClientRef.current.getDeliveryState(matchIdentity.u64)
+              
+              if (!checkDeliveryState) {
+                setStatus('Waiting for Player A to finish initializing match (delivery state)...')
+                return // Keep polling
+              }
+              
+              // ALL PDAs exist now - dismiss modal
+              console.log('[MatchStartModal] All PDAs detected via polling (from checkPDAAndDismiss) - dismissing modal')
+              
+              if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current)
+                pollingIntervalRef.current = null
+              }
+              
+              // Re-fetch match state to get latest timing
+              const latestMatchState = await solanaClientRef.current.checkMatchPDAExists(
+                matchId,
+                playerA,
+                playerB,
+                'confirmed'
+              )
+              
+              if (latestMatchState) {
+                const startTs = latestMatchState.startTs.toNumber ? latestMatchState.startTs.toNumber() : Number(latestMatchState.startTs)
+                const endTs = latestMatchState.endTs.toNumber ? latestMatchState.endTs.toNumber() : Number(latestMatchState.endTs)
+                growSlotTracker.setMatchTiming(startTs, endTs)
+                
+                if (!hasDismissedRef.current) {
+                  hasDismissedRef.current = true
+                  onMatchStarted()
+                }
+              }
+            } catch (error) {
+              console.error('[MatchStartModal] Error polling for PDAs (from checkPDAAndDismiss):', error)
+            }
+          }, 3000) // Poll every 3 seconds to avoid 429 rate limiting
+        }
+        
+        return
+      }
+
+      // Grow state exists - now check delivery state
+      const deliveryState = await solanaClient.getDeliveryState(matchIdentity.u64)
+      
+      if (!deliveryState) {
+        // Delivery state doesn't exist yet - Player A hasn't finished signing
+        console.log('[MatchStartModal] Grow state exists but delivery state PDA not found yet - waiting for Player A to finish signing')
+        setStatus('Waiting for Player A to finish initializing match (delivery state)...')
+        
+        // Start polling if not already
+        if (pollingIntervalRef.current === null) {
+          pollingIntervalRef.current = setInterval(async () => {
+            try {
+              if (!solanaClientRef.current || hasDismissedRef.current) {
+                if (pollingIntervalRef.current) {
+                  clearInterval(pollingIntervalRef.current)
+                  pollingIntervalRef.current = null
+                }
+                return
+              }
+              
+              const checkDeliveryState = await solanaClientRef.current.getDeliveryState(matchIdentity.u64)
+              
+              if (checkDeliveryState) {
+                console.log('[MatchStartModal] Delivery state PDA detected - dismissing modal')
+                
+                if (pollingIntervalRef.current) {
+                  clearInterval(pollingIntervalRef.current)
+                  pollingIntervalRef.current = null
+                }
+                
+                const latestMatchState = await solanaClientRef.current.checkMatchPDAExists(
+                  matchId,
+                  playerA,
+                  playerB,
+                  'confirmed'
+                )
+                
+                if (latestMatchState) {
+                  const startTs = latestMatchState.startTs.toNumber ? latestMatchState.startTs.toNumber() : Number(latestMatchState.startTs)
+                  const endTs = latestMatchState.endTs.toNumber ? latestMatchState.endTs.toNumber() : Number(latestMatchState.endTs)
+                  growSlotTracker.setMatchTiming(startTs, endTs)
+                  
+                  if (!hasDismissedRef.current) {
+                    hasDismissedRef.current = true
+                    onMatchStarted()
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('[MatchStartModal] Error polling for delivery state:', error)
+            }
+          }, 3000) // Poll every 3 seconds to avoid 429 rate limiting
+        }
+        
+        return
+      }
+
+      // ALL THREE PDAs exist - safe to dismiss
+      console.log('[MatchStartModal] ✅ All PDAs exist! Dismissing modal...')
+      
+      // Convert BN to number (authoritative on-chain value)
+      const startTs = matchState.startTs.toNumber ? matchState.startTs.toNumber() : Number(matchState.startTs)
+      const endTs = matchState.endTs.toNumber ? matchState.endTs.toNumber() : Number(matchState.endTs)
+      // Initialize growSlotTracker timing immediately so 3D indicators work
+      growSlotTracker.setMatchTiming(startTs, endTs)
+      
+      // Mark as dismissed immediately to prevent duplicate calls
+      if (hasDismissedRef.current) {
+        console.log('[MatchStartModal] Already dismissed, skipping...')
+        return
+      }
+      console.log('[MatchStartModal] Calling onMatchStarted() callback')
+      hasDismissedRef.current = true
+      onMatchStarted()
     } catch (error) {
-      // Error checking PDA - silently continue
+      console.error('[MatchStartModal] Error checking PDA:', error)
     }
   }
 
@@ -300,23 +444,229 @@ export function MatchStartModal({
       // Check if we're player A (the one who needs to sign)
       const isPlayerA = localWallet.equals(sortedA)
       if (!isPlayerA) {
-        // We're player B - just poll for PDA existence
+        // We're player B - subscribe to PDA account changes via WebSocket
         setStatus('Waiting for player A to start match...')
         hasSubmittedRef.current = true
-        // Start polling for PDA
-        const pollInterval = setInterval(() => {
-          checkPDAAndDismiss()
-        }, 2000) // Check every 2 seconds
-        pollingIntervalRef.current = pollInterval
+
+        // Create connection if not exists with proper WebSocket endpoint
+        if (!connectionRef.current) {
+          connectionRef.current = createSolanaConnection('confirmed')
+        }
+
+        // Derive match PDA for subscription
+        const matchIdentity = await createMatchIdentity(matchId)
+        const [matchPDA] = DroogGameClient.deriveMatchPDAFromHash(
+          matchIdentity.hash32,
+          sortedA,
+          sortedB
+        )
+
+        // Subscribe to account changes
+        const subscription = connectionRef.current.onAccountChange(
+          matchPDA,
+          async (accountInfo, context) => {
+            if (accountInfo && accountInfo.data && accountInfo.data.length > 0) {
+              console.log('[MatchStartModal] Match PDA detected via WebSocket subscription')
+              
+              // Parse account data and check for both PDAs
+              try {
+                // Create client to parse account
+                if (!solanaClientRef.current) {
+                  const dummyKeypair = Keypair.generate()
+                  const dummyWallet = createWalletFromKeypair(dummyKeypair)
+                  solanaClientRef.current = await GameClient.create(connectionRef.current!, dummyWallet)
+                }
+
+                const matchState = await solanaClientRef.current.checkMatchPDAExists(
+                  matchId,
+                  sortedA,
+                  sortedB,
+                  'confirmed'
+                )
+
+                if (!matchState) {
+                  return // Match PDA doesn't exist yet
+                }
+
+                // CRITICAL: Check that ALL dependent PDAs exist before dismissing
+                // Player A needs to sign initMatch, initGrowState, AND initDeliveryState
+                const growState = await solanaClientRef.current.getGrowState(matchIdentity.u64, 'confirmed')
+                
+                if (!growState) {
+                  // Grow state doesn't exist yet - Player A hasn't finished signing
+                  console.log('[MatchStartModal] Match PDA exists but grow state PDA not found yet - waiting for Player A to finish signing')
+                  setStatus('Waiting for Player A to finish initializing match (grow state)...')
+                  
+                  // Start polling for all dependent PDAs since subscription won't fire again
+                  // The match PDA subscription only fires on match PDA changes, not grow/delivery state changes
+                  if (pollingIntervalRef.current === null) {
+                    console.log('[MatchStartModal] Starting polling for dependent PDAs...')
+                    pollingIntervalRef.current = setInterval(async () => {
+                      try {
+                        if (!solanaClientRef.current || hasDismissedRef.current) {
+                          if (pollingIntervalRef.current) {
+                            clearInterval(pollingIntervalRef.current)
+                            pollingIntervalRef.current = null
+                          }
+                          return
+                        }
+                        
+                        const checkGrowState = await solanaClientRef.current.getGrowState(matchIdentity.u64, 'confirmed')
+                        
+                        if (!checkGrowState) {
+                          return // Keep polling - grow state not ready yet
+                        }
+                        console.log('[MatchStartModal] Grow state PDA detected')
+                        
+                        // Also check delivery state
+                        const checkDeliveryState = await solanaClientRef.current.getDeliveryState(matchIdentity.u64)
+                        
+                        if (!checkDeliveryState) {
+                          setStatus('Waiting for Player A to finish initializing match (delivery state)...')
+                          return // Keep polling
+                        }
+                        
+                        // ALL PDAs exist now - dismiss modal
+                        console.log('[MatchStartModal] All PDAs detected via polling - dismissing modal')
+                        
+                        if (pollingIntervalRef.current) {
+                          clearInterval(pollingIntervalRef.current)
+                          pollingIntervalRef.current = null
+                        }
+                        
+                        // Remove subscription
+                        if (accountSubscriptionRef.current !== null && connectionRef.current) {
+                          connectionRef.current.removeAccountChangeListener(accountSubscriptionRef.current)
+                          accountSubscriptionRef.current = null
+                        }
+                        
+                        // Re-fetch match state to get latest timing
+                        const latestMatchState = await solanaClientRef.current.checkMatchPDAExists(
+                          matchId,
+                          sortedA,
+                          sortedB,
+                          'confirmed'
+                        )
+                        
+                        if (latestMatchState) {
+                          const startTs = latestMatchState.startTs.toNumber ? latestMatchState.startTs.toNumber() : Number(latestMatchState.startTs)
+                          const endTs = latestMatchState.endTs.toNumber ? latestMatchState.endTs.toNumber() : Number(latestMatchState.endTs)
+                          growSlotTracker.setMatchTiming(startTs, endTs)
+                          
+                          if (!hasDismissedRef.current) {
+                            hasDismissedRef.current = true
+                            onMatchStarted()
+                          }
+                        }
+                      } catch (error) {
+                        console.error('[MatchStartModal] Error polling for PDAs:', error)
+                      }
+                    }, 3000) // Poll every 3 seconds to avoid 429 rate limiting
+                  }
+                  
+                  return // Keep subscription active, wait for all PDAs
+                }
+
+                // Grow state exists - check delivery state
+                const deliveryState = await solanaClientRef.current.getDeliveryState(matchIdentity.u64)
+                
+                if (!deliveryState) {
+                  // Delivery state doesn't exist yet
+                  console.log('[MatchStartModal] Grow state exists but delivery state PDA not found yet - waiting for Player A to finish signing')
+                  setStatus('Waiting for Player A to finish initializing match (delivery state)...')
+                  
+                  // Start polling for delivery state
+                  if (pollingIntervalRef.current === null) {
+                    pollingIntervalRef.current = setInterval(async () => {
+                      try {
+                        if (!solanaClientRef.current || hasDismissedRef.current) {
+                          if (pollingIntervalRef.current) {
+                            clearInterval(pollingIntervalRef.current)
+                            pollingIntervalRef.current = null
+                          }
+                          return
+                        }
+                        
+                        const checkDeliveryState = await solanaClientRef.current.getDeliveryState(matchIdentity.u64)
+
+                        if (checkDeliveryState) {
+                          console.log('[MatchStartModal] Delivery state PDA detected - dismissing modal')
+                          
+                          if (pollingIntervalRef.current) {
+                            clearInterval(pollingIntervalRef.current)
+                            pollingIntervalRef.current = null
+                          }
+                          
+                          if (accountSubscriptionRef.current !== null && connectionRef.current) {
+                            connectionRef.current.removeAccountChangeListener(accountSubscriptionRef.current)
+                            accountSubscriptionRef.current = null
+                          }
+                          
+                          const latestMatchState = await solanaClientRef.current.checkMatchPDAExists(
+                            matchId,
+                            sortedA,
+                            sortedB,
+                            'confirmed'
+                          )
+                          
+                          if (latestMatchState) {
+                            const startTs = latestMatchState.startTs.toNumber ? latestMatchState.startTs.toNumber() : Number(latestMatchState.startTs)
+                            const endTs = latestMatchState.endTs.toNumber ? latestMatchState.endTs.toNumber() : Number(latestMatchState.endTs)
+                            growSlotTracker.setMatchTiming(startTs, endTs)
+                            
+                            if (!hasDismissedRef.current) {
+                              hasDismissedRef.current = true
+                              onMatchStarted()
+                            }
+                          }
+                        }
+                      } catch (error) {
+                        console.error('[MatchStartModal] Error polling for delivery state:', error)
+                      }
+                    }, 3000) // Poll every 3 seconds to avoid 429 rate limiting
+                  }
+                  
+                  return // Keep subscription active
+                }
+
+                // ALL THREE PDAs exist - safe to dismiss
+                // Clear polling if it was started
+                if (pollingIntervalRef.current) {
+                  clearInterval(pollingIntervalRef.current)
+                  pollingIntervalRef.current = null
+                }
+                
+                // Remove subscription
+                if (accountSubscriptionRef.current !== null && connectionRef.current) {
+                  connectionRef.current.removeAccountChangeListener(accountSubscriptionRef.current)
+                  accountSubscriptionRef.current = null
+                }
+
+                const startTs = matchState.startTs.toNumber ? matchState.startTs.toNumber() : Number(matchState.startTs)
+                const endTs = matchState.endTs.toNumber ? matchState.endTs.toNumber() : Number(matchState.endTs)
+                growSlotTracker.setMatchTiming(startTs, endTs)
+                
+                if (!hasDismissedRef.current) {
+                  hasDismissedRef.current = true
+                  onMatchStarted()
+                }
+              } catch (error) {
+                console.error('[MatchStartModal] Error parsing PDA account:', error)
+              }
+            }
+          },
+          'confirmed'
+        )
+
+        accountSubscriptionRef.current = subscription
         return
       }
 
       // We're player A - submit the transaction
       setStatus('Signing transaction...')
 
-      // Create connection and wallet
-      const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com'
-      const connection = new Connection(rpcUrl, 'confirmed')
+      // Create connection and wallet with proper WebSocket endpoint
+      const connection = createSolanaConnection('confirmed')
       connectionRef.current = connection
 
       if (!solanaWallets || solanaWallets.length === 0) {
@@ -331,11 +681,92 @@ export function MatchStartModal({
       if (!shouldSubmitTransaction(localWallet, sortedA, sortedB)) {
         setStatus('Waiting for other player to start match...')
         hasSubmittedRef.current = true
-        // Start polling for PDA
-        const pollInterval = setInterval(() => {
-          checkPDAAndDismiss()
-        }, 2000)
-        pollingIntervalRef.current = pollInterval
+
+        // Create connection if not exists with proper WebSocket endpoint
+        if (!connectionRef.current) {
+          connectionRef.current = createSolanaConnection('confirmed')
+        }
+
+        // Derive match PDA for subscription
+        const matchIdentity = await createMatchIdentity(matchId)
+        const [matchPDA] = DroogGameClient.deriveMatchPDAFromHash(
+          matchIdentity.hash32,
+          sortedA,
+          sortedB
+        )
+
+        // Subscribe to account changes
+        const subscription = connectionRef.current.onAccountChange(
+          matchPDA,
+          async (accountInfo, context) => {
+            if (accountInfo && accountInfo.data && accountInfo.data.length > 0) {
+              console.log('[MatchStartModal] Match PDA detected via WebSocket subscription')
+              
+              // Parse account data and check for both PDAs
+              try {
+                // Create client to parse account
+                if (!solanaClientRef.current) {
+                  const dummyKeypair = Keypair.generate()
+                  const dummyWallet = createWalletFromKeypair(dummyKeypair)
+                  solanaClientRef.current = await GameClient.create(connectionRef.current!, dummyWallet)
+                }
+
+                const matchState = await solanaClientRef.current.checkMatchPDAExists(
+                  matchId,
+                  sortedA,
+                  sortedB,
+                  'confirmed'
+                )
+
+                if (!matchState) {
+                  return // Match PDA doesn't exist yet
+                }
+
+                // CRITICAL: Check that ALL dependent PDAs exist before dismissing
+                // Player A needs to sign initMatch, initGrowState, AND initDeliveryState
+                const growState = await solanaClientRef.current.getGrowState(matchIdentity.u64, 'confirmed')
+                
+                if (!growState) {
+                  // Grow state doesn't exist yet - Player A hasn't finished signing
+                  console.log('[MatchStartModal] Match PDA exists but grow state PDA not found yet - waiting for Player A to finish signing')
+                  setStatus('Waiting for Player A to finish initializing match (grow state)...')
+                  return // Keep subscription active, wait for grow state
+                }
+
+                // Also check delivery state
+                const deliveryState = await solanaClientRef.current.getDeliveryState(matchIdentity.u64)
+                
+                if (!deliveryState) {
+                  // Delivery state doesn't exist yet
+                  console.log('[MatchStartModal] Grow state exists but delivery state PDA not found yet - waiting for Player A to finish signing')
+                  setStatus('Waiting for Player A to finish initializing match (delivery state)...')
+                  return // Keep subscription active, wait for delivery state
+                }
+
+                // ALL THREE PDAs exist - safe to dismiss
+                // Remove subscription
+                if (accountSubscriptionRef.current !== null && connectionRef.current) {
+                  connectionRef.current.removeAccountChangeListener(accountSubscriptionRef.current)
+                  accountSubscriptionRef.current = null
+                }
+
+                const startTs = matchState.startTs.toNumber ? matchState.startTs.toNumber() : Number(matchState.startTs)
+                const endTs = matchState.endTs.toNumber ? matchState.endTs.toNumber() : Number(matchState.endTs)
+                growSlotTracker.setMatchTiming(startTs, endTs)
+                
+                if (!hasDismissedRef.current) {
+                  hasDismissedRef.current = true
+                  onMatchStarted()
+                }
+              } catch (error) {
+                console.error('[MatchStartModal] Error parsing PDA account:', error)
+              }
+            }
+          },
+          'confirmed'
+        )
+
+        accountSubscriptionRef.current = subscription
         return
       }
 
@@ -358,40 +789,95 @@ export function MatchStartModal({
       // Wait for confirmation
       await connection.confirmTransaction(txSignature, 'confirmed')
 
-      // Fetch the confirmed match state to get the actual on-chain startTs
-      // Use 'confirmed' commitment to match the transaction confirmation level for immediate availability
-      const matchState = await solanaClient.checkMatchPDAExists(matchId, sortedA, sortedB, 'confirmed')
-      if (matchState) {
-        // Convert BN to number (authoritative on-chain value)
+      console.log('[MatchStartModal] Transaction confirmed, fetching match state...')
+      setStatus('Fetching match state...')
+
+      // Fetch match state immediately after confirmation
+      try {
+        const matchState = await solanaClient.checkMatchPDAExists(matchId, sortedA, sortedB, 'confirmed')
+
+        if (!matchState) {
+          throw new Error('Match PDA not found after transaction confirmation')
+        }
+
+        if (!matchState.playerA || !matchState.playerB) {
+          throw new Error('Match state missing playerA or playerB')
+        }
+
+        // Convert BN to numbers (authoritative on-chain values)
         const startTs = matchState.startTs.toNumber ? matchState.startTs.toNumber() : Number(matchState.startTs)
         const endTs = matchState.endTs.toNumber ? matchState.endTs.toNumber() : Number(matchState.endTs)
-        // Initialize match time with the on-chain startTs (authoritative)
-        initializeMatchTime(startTs)
-        // Initialize growSlotTracker timing immediately so 3D indicators work
+
+        // Set match timing
         growSlotTracker.setMatchTiming(startTs, endTs)
+
+        // Store player addresses for other components to access
+        const playerAStr = matchState.playerA.toBase58()
+        const playerBStr = matchState.playerB.toBase58()
+        sessionStorage.setItem('match_playerA', playerAStr)
+        sessionStorage.setItem('match_playerB', playerBStr)
+
+        console.log('[MatchStartModal] Match state fetched successfully', {
+          playerA: playerAStr,
+          playerB: playerBStr,
+          startTs,
+          endTs
+        })
+        console.log('[MatchStartModal] Match timing initialized. StartTs:', startTs, 'EndTs:', endTs)
+
+        // Now proceed with grow state initialization
+        setStatus('Initializing grow state...')
+        await solanaClient.initGrowState(matchId, sortedA, sortedB)
+
+        // Initialize delivery state (required for sell_to_customer)
+        setStatus('Initializing delivery state...')
+        await solanaClient.initDeliveryState(matchId, sortedA, sortedB)
+
+        console.log('[MatchStartModal] Match, grow state, and delivery state initialized successfully')
         setStatus('Match started!')
         setPdaExists(true)
 
-        // Optionally initialize grow state proactively (non-blocking)
-        // This is an optimization - plantStrain will auto-initialize if needed
-        solanaClient.initGrowState(matchId, sortedA, sortedB).then(() => {
-          console.log('[MatchStartModal] Grow state initialized successfully')
-        }).catch((error) => {
-          // Non-blocking - plantStrain will handle initialization if this fails
-          console.log('[MatchStartModal] Grow state initialization skipped (will be initialized on first plant):', error.message)
-        })
-
-        // Dismiss modal after a short delay
-        setTimeout(() => {
-          checkPDAAndDismiss()
-        }, 1000)
-      } else {
-        setStatus('Match started but state not found. Waiting...')
-        // Start polling for PDA
-        const pollInterval = setInterval(() => {
-          checkPDAAndDismiss()
-        }, 2000)
-        pollingIntervalRef.current = pollInterval
+        // Dismiss modal after all state is properly set
+        if (!hasDismissedRef.current) {
+          hasDismissedRef.current = true
+          onMatchStarted()
+        }
+      } catch (error: any) {
+        console.error('[MatchStartModal] Error initializing match state:', error)
+        // Retry once if match state fetch failed
+        if (error.message?.includes('Match PDA not found') || error.message?.includes('missing player')) {
+          console.log('[MatchStartModal] Retrying match state fetch...')
+          setStatus('Retrying match state fetch...')
+          try {
+            await new Promise(resolve => setTimeout(resolve, 1000)) // Wait 1 second
+            const retryMatchState = await solanaClient.checkMatchPDAExists(matchId, sortedA, sortedB, 'confirmed')
+            if (retryMatchState && retryMatchState.playerA && retryMatchState.playerB) {
+              const startTs = retryMatchState.startTs.toNumber ? retryMatchState.startTs.toNumber() : Number(retryMatchState.startTs)
+              const endTs = retryMatchState.endTs.toNumber ? retryMatchState.endTs.toNumber() : Number(retryMatchState.endTs)
+              growSlotTracker.setMatchTiming(startTs, endTs)
+              const playerAStr = retryMatchState.playerA.toBase58()
+              const playerBStr = retryMatchState.playerB.toBase58()
+              sessionStorage.setItem('match_playerA', playerAStr)
+              sessionStorage.setItem('match_playerB', playerBStr)
+              await solanaClient.initGrowState(matchId, sortedA, sortedB)
+              await solanaClient.initDeliveryState(matchId, sortedA, sortedB)
+              console.log('[MatchStartModal] Match state and dependent PDAs initialized successfully on retry')
+              setStatus('Match started!')
+              setPdaExists(true)
+              if (!hasDismissedRef.current) {
+                hasDismissedRef.current = true
+                onMatchStarted()
+              }
+              return
+            }
+          } catch (retryError) {
+            console.error('[MatchStartModal] Retry also failed:', retryError)
+          }
+        }
+        setStatus(`Error: ${error.message || 'Failed to initialize match state. Please try again.'}`)
+        setIsSubmitting(false)
+        hasSubmittedRef.current = false
+        return // Don't dismiss modal on error
       }
     } catch (error: any) {
       console.error('[MatchStartModal] Error starting match:', error)
@@ -401,38 +887,45 @@ export function MatchStartModal({
     }
   }
 
-  // Poll for PDA existence if we haven't submitted
+  // Check if PDA already exists when modal opens, and periodically check
+  // IMPORTANT: This runs regardless of hasSubmittedRef to provide backup detection
+  // in case WebSocket subscriptions don't fire (common on devnet)
   useEffect(() => {
-    if (!bothPlayersReady || hasSubmittedRef.current || hasDismissedRef.current) {
+    if (!bothPlayersReady || hasDismissedRef.current) {
       return
     }
 
-    // Check if PDA already exists
+    // Check if PDA already exists (one-time check)
+    console.log('[MatchStartModal] Starting periodic PDA check...')
     checkPDAAndDismiss()
-
-    // Set up polling interval
-    const pollInterval = setInterval(() => {
-      checkPDAAndDismiss()
-    }, 2000) // Check every 2 seconds
-
-    pollingIntervalRef.current = pollInterval
-
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-        pollingIntervalRef.current = null
+    
+    // Set up periodic checking as a BACKUP for WebSocket subscriptions
+    // This ensures Player B's modal closes even if WebSocket doesn't fire
+    const checkInterval = setInterval(() => {
+      if (hasDismissedRef.current) {
+        console.log('[MatchStartModal] Modal dismissed, stopping periodic check')
+        clearInterval(checkInterval)
+        return
       }
+      checkPDAAndDismiss()
+    }, 3000) // Check every 3 seconds as backup
+    
+    return () => {
+      console.log('[MatchStartModal] Cleanup: clearing periodic check interval')
+      clearInterval(checkInterval)
     }
   }, [bothPlayersReady, matchId, playerAWallet, playerBWallet])
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (accountSubscriptionRef.current !== null && connectionRef.current) {
+        connectionRef.current.removeAccountChangeListener(accountSubscriptionRef.current)
+        accountSubscriptionRef.current = null
+      }
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current)
-      }
-      if (subscriptionIdRef.current !== null && connectionRef.current) {
-        connectionRef.current.removeAccountChangeListener(subscriptionIdRef.current)
+        pollingIntervalRef.current = null
       }
     }
   }, [])

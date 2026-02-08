@@ -15,7 +15,12 @@ interface PrivyProviderProps {
  */
 export function PrivyProvider({ children }: PrivyProviderProps) {
   const appId = import.meta.env.VITE_PRIVY_APP_ID
-  let rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com'
+  let rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL
+  
+  if (!rpcUrl) {
+    console.error('[PrivyProvider] VITE_SOLANA_RPC_URL is not configured!')
+    throw new Error('VITE_SOLANA_RPC_URL is required. Set your Helius RPC URL in .env file.')
+  }
   
   // For Helius RPC URLs with query parameters, ensure the URL is properly formatted
   // @solana/kit's createSolanaRpc should handle query parameters, but there's a known issue
@@ -45,17 +50,40 @@ export function PrivyProvider({ children }: PrivyProviderProps) {
   }
   
   // Extract WebSocket URL from HTTP URL (replace https:// with wss://)
-  // For private RPC providers, WebSocket might not be available, so fallback to public WebSocket
+  // For Helius, use the same endpoint with WebSocket protocol and preserve API key
   let wsUrl: string
-  if (rpcUrl.includes('helius-rpc.com') || rpcUrl.includes('quicknode') || rpcUrl.includes('alchemy')) {
-    // Private RPC providers may not support WebSocket subscriptions
-    // Use public WebSocket endpoint as fallback
-    wsUrl = 'wss://api.devnet.solana.com'
-    console.log('[PrivyProvider] Using private RPC for HTTP, public WebSocket for subscriptions:', {
+  if (rpcUrl.includes('helius-rpc.com')) {
+    // Helius supports WebSocket subscriptions - use the same endpoint with wss://
+    // Extract API key from RPC URL and include it in WebSocket URL
+    try {
+      const urlObj = new URL(rpcUrl)
+      const apiKey = urlObj.searchParams.get('api-key')
+      if (apiKey) {
+        // Use Helius WebSocket endpoint with API key
+        wsUrl = `wss://${urlObj.host}${urlObj.pathname}?api-key=${apiKey}`
+        console.log('[PrivyProvider] Using Helius WebSocket endpoint:', {
+          rpcUrl,
+          wsUrl: wsUrl.replace(/api-key=[^&]+/, 'api-key=***'),
+        })
+      } else {
+        // Fallback if API key not found (shouldn't happen)
+        wsUrl = rpcUrl.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://')
+        console.warn('[PrivyProvider] Helius RPC URL detected but no API key found, using derived WebSocket URL')
+      }
+    } catch (e) {
+      console.error('[PrivyProvider] Error constructing Helius WebSocket URL:', e)
+      // Fallback to derived URL
+      wsUrl = rpcUrl.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://')
+    }
+  } else if (rpcUrl.includes('quicknode') || rpcUrl.includes('alchemy')) {
+    // Other private RPC providers - try to derive WebSocket URL, fallback to public if needed
+    wsUrl = rpcUrl.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://')
+    console.log('[PrivyProvider] Using derived WebSocket URL for private RPC:', {
       rpcUrl,
       wsUrl,
     })
   } else {
+    // Public RPC endpoints - simple protocol replacement
     wsUrl = rpcUrl.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://')
   }
   
