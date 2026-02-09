@@ -44,8 +44,9 @@ class SessionStore {
     const oldMatchId = oldSession?.matchId
     
     // Revoke any existing session for this user
-    // But preserve participation in the new match if it's different from the old match
-    this.revokeSession(privyUserId, matchId !== oldMatchId ? matchId : undefined)
+    // ALWAYS preserve the new match to prevent removing user from their current match
+    // This handles the case where a user rejoins the same match (e.g., page refresh)
+    this.revokeSession(privyUserId, matchId)
 
     this.activeSessions.set(privyUserId, {
       peerId,
@@ -55,6 +56,8 @@ class SessionStore {
     })
 
     this.peerToUser.set(peerId, privyUserId)
+    
+    console.log(`[SessionStore] Registered session for ${privyUserId}, matchId: ${matchId}, oldMatchId: ${oldMatchId}`)
   }
 
   /**
