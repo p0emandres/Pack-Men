@@ -945,13 +945,19 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
           // Start polling for ready status instead
           if (allReady) {
             // Both players are already ready, start game
+            console.log('Both players already ready when 2 players detected, starting game...')
             // Don't start pollReadyStatus since we're starting the game directly
             startGame(matchId, accessToken)
           } else {
-            // Start polling for ready status
-            const cleanup = pollReadyStatus(matchId, accessToken)
-            if (cleanup) {
-              pollCleanupRef.current = cleanup
+            // Only start polling if not already polling
+            if (!pollCleanupRef.current) {
+              console.log('Starting ready status polling after 2 players detected')
+              const cleanup = pollReadyStatus(matchId, accessToken)
+              if (cleanup) {
+                pollCleanupRef.current = cleanup
+              }
+            } else {
+              console.log('Ready polling already active, not starting another')
             }
           }
         } else if (attempts < maxAttempts && !isCancelled) {
@@ -1128,14 +1134,25 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
 
       // If both players are ready, start the game
       if (data.allReady) {
+        console.log('Both players ready after ready button click, starting game...')
         setIsLoading(false)
+        // Stop any existing polling before starting game
+        if (pollCleanupRef.current && typeof pollCleanupRef.current === 'function') {
+          pollCleanupRef.current()
+          pollCleanupRef.current = null
+        }
         startGame(matchCode, accessToken)
       } else {
         setIsLoading(false)
-        // Start polling for ready status
-        const cleanup = pollReadyStatus(matchCode, accessToken)
-        if (cleanup) {
-          pollCleanupRef.current = cleanup
+        // Only start polling if not already polling
+        if (!pollCleanupRef.current) {
+          console.log('Starting ready status polling after ready button click')
+          const cleanup = pollReadyStatus(matchCode, accessToken)
+          if (cleanup) {
+            pollCleanupRef.current = cleanup
+          }
+        } else {
+          console.log('Polling already active, not starting another poll loop')
         }
       }
     } catch (error) {
