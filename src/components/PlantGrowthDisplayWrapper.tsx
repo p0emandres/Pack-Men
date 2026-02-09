@@ -221,8 +221,7 @@ export function PlantGrowthDisplayWrapper() {
             // Check if the slot shows as planted for the current player
             const isPlayerA = solanaWallets?.[0]?.address === confirmedGrowState.playerA?.toString()
             const relevantSlot = isPlayerA ? playerASlot : playerBSlot
-            const isStillEmpty = relevantSlot?.plantState?.__kind === 'Empty' || 
-                                 relevantSlot?.plantState?.empty !== undefined
+            const isStillEmpty = relevantSlot?.plantState?.__kind === 'Empty'
             
             if (isStillEmpty && attempt < maxAttempts) {
               // Exponential backoff: 500ms, 1000ms, 1500ms, 2000ms, 2500ms
@@ -427,8 +426,7 @@ export function PlantGrowthDisplayWrapper() {
             )
             
             // Check if the slot shows as empty (harvested)
-            const isNowEmpty = harvestedSlot?.plantState?.__kind === 'Empty' || 
-                               harvestedSlot?.plantState?.empty !== undefined ||
+            const isNowEmpty = harvestedSlot?.plantState?.__kind === 'Empty' ||
                                !harvestedSlot?.occupied
             
             if (!isNowEmpty && attempt < maxAttempts) {
