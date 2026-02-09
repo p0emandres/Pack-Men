@@ -7,10 +7,30 @@ dist
 target/
 **/target/
 
+# =============================================================================
+# CRITICAL: Wallet and Keypair Files (NEVER commit these)
+# =============================================================================
+# Solana wallet files
+*-wallet.json
+*wallet*.json
+devnet-wallet.json
+mainnet-wallet.json
+
+# Anchor/Solana program keypairs
+*-keypair.json
+*keypair*.json
+
+# Any JSON file that might contain keys (be explicit about what you DO want)
+# If you need to commit specific JSON files, add them with !filename.json
+
+# =============================================================================
 # Environment variables (CRITICAL: Never commit secrets)
+# =============================================================================
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
 server/.env
 server/.env.local
 server/.env.*.local
