@@ -7,7 +7,6 @@ import { createSolanaConnection } from '../game/solanaConnection'
 import { PACKS_MINT } from '../game/solanaClient'
 import type { PlayerIdentity } from '../types/identity'
 import { MatchStartModal } from './MatchStartModal'
-import { identityStore } from '../game/identityStore'
 
 interface PlayerMetrics {
   games_played: number
@@ -951,6 +950,10 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
           const currentUserReady = matchReadyPlayers.includes(user?.id || '')
           setIsReady(currentUserReady)
           
+          // Clear the match status polling cleanup since we're done with it
+          // (the cleanup was already executed by setting isCancelled = true above)
+          pollCleanupRef.current = null
+          
           // Start polling for ready status instead
           if (allReady) {
             // Both players are already ready, start game
@@ -958,15 +961,11 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
             // Don't start pollReadyStatus since we're starting the game directly
             startGame(matchId, accessToken)
           } else {
-            // Only start polling if not already polling
-            if (!pollCleanupRef.current) {
-              console.log('Starting ready status polling after 2 players detected')
-              const cleanup = pollReadyStatus(matchId, accessToken)
-              if (cleanup) {
-                pollCleanupRef.current = cleanup
-              }
-            } else {
-              console.log('Ready polling already active, not starting another')
+            // Start polling for ready status
+            console.log('Starting ready status polling after 2 players detected')
+            const cleanup = pollReadyStatus(matchId, accessToken)
+            if (cleanup) {
+              pollCleanupRef.current = cleanup
             }
           }
         } else if (attempts < maxAttempts && !isCancelled) {
@@ -1242,6 +1241,9 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
       })
 
       // Create and store the pending identity (will be used after Solana init completes)
+      // Note: We DON'T call identityStore.setIdentity() here because that will happen
+      // in initScene() when the game actually starts. The MatchStartModal uses props
+      // instead of the identity store.
       const playerIdentity: PlayerIdentity = {
         privyUserId: user?.id || '',
         walletAddress: walletAddress || undefined,
@@ -1251,9 +1253,6 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
         matchId,
       }
       pendingIdentityRef.current = playerIdentity
-      
-      // Store identity in global store so MatchStartModal can access it
-      identityStore.setIdentity(playerIdentity)
 
       // Fetch wallet addresses for both players from the server
       const apiBaseUrl = import.meta.env.VITE_API_URL || ''
@@ -1408,12 +1407,13 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
       <style>{dashboardStyle}</style>
       
       {/* MatchStartModal for Solana PDA initialization - shown BEFORE entering game */}
-      {showMatchStartModal && playerAWallet && playerBWallet && (
+      {showMatchStartModal && playerAWallet && playerBWallet && matchCode && (
         <MatchStartModal
           onMatchStarted={handleMatchStarted}
           bothPlayersReady={true}
           playerAWallet={playerAWallet}
           playerBWallet={playerBWallet}
+          matchIdString={matchCode}
         />
       )}
       

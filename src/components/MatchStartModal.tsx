@@ -24,6 +24,8 @@ interface MatchStartModalProps {
   playerAWallet: string
   /** Player B's wallet address (for PDA derivation) */
   playerBWallet: string
+  /** Match ID string (e.g., "match_1234567890_abc123") */
+  matchIdString?: string
 }
 
 const modalStyle = `
@@ -171,6 +173,7 @@ export function MatchStartModal({
   bothPlayersReady,
   playerAWallet,
   playerBWallet,
+  matchIdString,
 }: MatchStartModalProps) {
   const { user } = usePrivy()
   const { wallets: solanaWallets } = useWallets()
@@ -186,8 +189,9 @@ export function MatchStartModal({
   const connectionRef = useRef<Connection | null>(null)
   const solanaClientRef = useRef<GameClient | null>(null)
 
+  // Use matchIdString prop if provided, otherwise fall back to identity store
   const identity = getPlayerIdentity()
-  const matchId = identity?.matchId
+  const matchId = matchIdString || identity?.matchId
 
   // Get local wallet address
   const getLocalWalletAddress = (): string | null => {
