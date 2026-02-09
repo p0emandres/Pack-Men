@@ -15,6 +15,7 @@ import {
 import { copPhaseSystem, type CopPhase } from '../../game/copSystem/copPhaseSystem'
 import { smellAggregator, type CopBudget, type SmellTier, SMELL_TIERS } from '../../game/copSystem/smellAggregator'
 import { applyTextureQuality } from '../../game/qualitySettings'
+import { resolveCollision } from '../../game/buildingCollision'
 
 /**
  * Spawn points for cops - edges of the city map.
@@ -256,15 +257,31 @@ export class CopEntities {
       spawnPoint.z - center.z
     )
     
-    // Apply personality color
+    // Apply personality color - MUST clone materials to avoid shared state
+    // SkeletonUtils.clone() shares materials between clones, so modifying
+    // one would affect all. Each cop needs its own material instance.
     const color = COP_COLORS[personality]
     group.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
-        const material = child.material as THREE.MeshStandardMaterial
-        if (material.isMeshStandardMaterial) {
-          material.color.setHex(color)
-          material.emissive.setHex(color)
-          material.emissiveIntensity = 0.2
+        // Clone the material so each cop has independent colors
+        if (Array.isArray(child.material)) {
+          child.material = child.material.map(mat => {
+            const clonedMat = mat.clone()
+            if (clonedMat instanceof THREE.MeshStandardMaterial) {
+              clonedMat.color.setHex(color)
+              clonedMat.emissive.setHex(color)
+              clonedMat.emissiveIntensity = 0.2
+            }
+            return clonedMat
+          })
+        } else {
+          const clonedMat = child.material.clone()
+          if (clonedMat instanceof THREE.MeshStandardMaterial) {
+            clonedMat.color.setHex(color)
+            clonedMat.emissive.setHex(color)
+            clonedMat.emissiveIntensity = 0.2
+          }
+          child.material = clonedMat
         }
       }
     })
@@ -433,8 +450,14 @@ export class CopEntities {
     // Calculate movement distance
     const moveDistance = Math.min(cop.currentSpeed * deltaTime, distance)
     
-    // Update position
-    cop.position.addScaledVector(direction, moveDistance)
+    // Calculate new position
+    const newX = cop.position.x + direction.x * moveDistance
+    const newZ = cop.position.z + direction.z * moveDistance
+    
+    // Resolve collision with buildings
+    const resolved = resolveCollision(cop.position.x, cop.position.z, newX, newZ)
+    cop.position.x = resolved.x
+    cop.position.z = resolved.z
     cop.position.y = 0 // Keep on ground
     cop.group.position.copy(cop.position)
     

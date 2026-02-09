@@ -10,6 +10,7 @@ import { growSlotIndicatorManagerA, growSlotIndicatorManagerB } from './game/gro
 import { deliveryIndicatorManager } from './game/deliveryIndicators';
 import { captureSystem } from './game/copSystem';
 import { audioManager } from './game/audioManager';
+import { resolveCollision, isInsideBuilding } from './game/buildingCollision';
 import { 
     registerMobileControlEvents, 
     registerInteractionCallback, 
@@ -5561,10 +5562,20 @@ function animate(): void {
             const isRunning = keys['shift'];
             const currentSpeed = isRunning ? runSpeed : walkSpeed;
             
-            // Move character
+            // Move character with building collision detection
             const moveDistance = currentSpeed * delta;
-            farmer.position.x += moveDirection.x * moveDistance;
-            farmer.position.z += moveDirection.z * moveDistance;
+            const newX = farmer.position.x + moveDirection.x * moveDistance;
+            const newZ = farmer.position.z + moveDirection.z * moveDistance;
+            
+            // Only apply collision when not in a room (rooms have their own boundaries)
+            if (currentRoomId === null) {
+                const resolved = resolveCollision(farmer.position.x, farmer.position.z, newX, newZ);
+                farmer.position.x = resolved.x;
+                farmer.position.z = resolved.z;
+            } else {
+                farmer.position.x = newX;
+                farmer.position.z = newZ;
+            }
             
             // Keep character on ground
             farmer.position.y = 0;
