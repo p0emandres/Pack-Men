@@ -154,7 +154,7 @@ export function MatchTimer({ matchStartTs: propMatchStartTs, matchEndTs: propMat
   const minutes = Math.floor(timeRemaining / 60)
   const seconds = Math.floor(timeRemaining % 60)
   const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-  const isLowTime = timeRemaining < 300 // Less than 5 minutes
+  const isLowTime = timeRemaining < 120 // Less than 2 minutes (adjusted for 10-min matches)
   const isCritical = timeRemaining < 60 // Less than 1 minute
 
   return (

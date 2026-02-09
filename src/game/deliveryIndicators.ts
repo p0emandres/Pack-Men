@@ -481,8 +481,7 @@ export class DeliveryIndicatorManager {
 
     this._isInitialized = true;
     
-    if (matchId !== undefined) {
-    }
+    console.log('[DeliveryIndicatorManager] Initialized with', this.indicators.size, 'indicators. matchId:', matchId ?? 'none (all visible)');
 
     this.printMapping();
   }
@@ -506,7 +505,6 @@ export class DeliveryIndicatorManager {
    * Shows/hides indicators based on which customers are available.
    */
   private handleAvailabilityUpdate(state: DeliveryState): void {
-    
     // Create a set of available building IDs for fast lookup
     const availableBuildingIds = new Set<string>();
     for (const customerIndex of state.availableCustomers) {
@@ -585,6 +583,22 @@ export class DeliveryIndicatorManager {
   }
 
   /**
+   * Mark a customer as delivered (hide their indicator).
+   * This provides immediate visual feedback after a successful delivery.
+   * The indicator will reappear on the next rotation refresh.
+   * 
+   * @param customerIndex - The customer index that was delivered to
+   */
+  markCustomerDelivered(customerIndex: number): void {
+    const buildingId = customerIndexToBuildingId(customerIndex);
+    const indicator = this.indicators.get(buildingId);
+    if (indicator) {
+      indicator.group.visible = false;
+      console.log(`[DeliveryIndicatorManager] Marked customer ${customerIndex} as delivered (hidden indicator)`);
+    }
+  }
+
+  /**
    * Get an indicator by building ID.
    */
   getIndicator(buildingId: string): DeliveryIndicator | undefined {
@@ -603,6 +617,40 @@ export class DeliveryIndicatorManager {
    */
   getIndicatorsByLayer(layer: BuildingLayer): DeliveryIndicator[] {
     return [...this.indicators.values()].filter(i => i.layer === layer);
+  }
+
+  /**
+   * Check if player is near any AVAILABLE delivery indicator.
+   * Returns the customerIndex if within range, null otherwise.
+   * 
+   * NOTE: This is for UI gating only. On-chain is authoritative.
+   * Even if this returns a customerIndex, the on-chain instruction
+   * may still reject the delivery for various reasons.
+   * 
+   * @param playerPosition - The player's current 3D position
+   * @returns customerIndex (0-22) if near an available indicator, null otherwise
+   */
+  checkProximity(playerPosition: THREE.Vector3): number | null {
+    let visibleCount = 0;
+    for (const [buildingId, indicator] of this.indicators) {
+      // Only check visible (available) indicators
+      if (!indicator.group.visible) continue;
+      visibleCount++;
+      
+      // 2D distance check on XZ plane (ignore Y)
+      const dx = playerPosition.x - indicator.position.x;
+      const dz = playerPosition.z - indicator.position.z;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+      
+      if (distance <= GROUND_CIRCLE_RADIUS) {
+        // Look up customerIndex from buildingId
+        const customerIndex = buildingIdToCustomerIndex(buildingId);
+        if (customerIndex >= 0) {
+          return customerIndex;
+        }
+      }
+    }
+    return null;
   }
 
   /**

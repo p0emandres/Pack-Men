@@ -8,12 +8,17 @@ import { getCurrentRoomId, getCurrentSceneType } from '../scene'
 import { PlantGrowthDisplay, plantGrowthStyles } from './PlantGrowthDisplay'
 import { GrowSlotPlantingModalManager } from './GrowSlotPlantingModalManager'
 import { InventoryModal } from './InventoryModal'
+import { DeliveryModalManager } from './DeliveryModalManager'
 import { MatchTimer } from './MatchTimer'
 import { getCurrentMatchTime } from '../game/timeUtils'
 import { growSlotTracker } from '../game/growSlotTracker'
 import { mockedGrowState } from '../game/tutorial/MockedGrowState'
 import { createMatchIdentity } from '../game/matchIdentity'
+import { deliveryIndicatorManager } from '../game/deliveryIndicators'
+import { MatchScoreboard } from './MatchScoreboard'
+import { MatchEndModalManager } from './MatchEndModalManager'
 import { useWallets, useSignTransaction } from '@privy-io/react-auth/solana'
+import { MobileControls } from './MobileControls'
 
 /**
  * Wrapper component that fetches match state and renders PlantGrowthDisplay
@@ -31,6 +36,12 @@ export function PlantGrowthDisplayWrapper() {
   const [isInventoryOpen, setIsInventoryOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [isPlanting, setIsPlanting] = useState<Set<number>>(new Set())
+  
+  // Match scoreboard state
+  const [playerASales, setPlayerASales] = useState(0)
+  const [playerBSales, setPlayerBSales] = useState(0)
+  const [playerAReputation, setPlayerAReputation] = useState(0)
+  const [playerBReputation, setPlayerBReputation] = useState(0)
   
   // Track matchStartTs in ref for retry logic (to check in interval callback)
   const matchStartTsRef = useRef<number | null>(null)
@@ -295,7 +306,7 @@ export function PlantGrowthDisplayWrapper() {
         if (error.message.includes('SlotOccupied')) {
           errorMessage = 'This slot is already occupied. Please select an empty slot.'
         } else if (error.message.includes('EndgamePlantingLocked')) {
-          errorMessage = 'Planting is locked during the final 5 minutes of the match.'
+          errorMessage = 'Planting is locked during the final minute of the match.'
         } else if (error.message.includes('PlantWontBeReady')) {
           errorMessage = 'This strain will not be ready before the match ends. Choose a faster-growing strain.'
         } else if (error.message.includes('MatchNotStarted')) {
@@ -358,48 +369,125 @@ export function PlantGrowthDisplayWrapper() {
       // Get match identity for state fetching
       const matchIdentity = await createMatchIdentity(matchIdString)
       
-      // Call harvestStrain
+      // Call harvestStrain - this now internally confirms the transaction
+      console.log(`[PlantGrowthDisplayWrapper] Calling harvestStrain for slot ${slotIndex}...`)
       const txSignature = await client.harvestStrain(
         matchIdString,
         playerA,
         playerB,
         slotIndex
       )
+      console.log(`[PlantGrowthDisplayWrapper] harvestStrain returned: ${txSignature}`)
       
-      // STEP 2: Wait for transaction confirmation
+      // Verify the transaction was included by fetching its status
+      // This is a sanity check to ensure the TX landed on-chain
       try {
-        await connection.confirmTransaction(txSignature, 'confirmed')
-      } catch (confirmError: any) {
-        // Wait a bit for the transaction to propagate
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        const txStatus = await connection.getSignatureStatus(txSignature)
+        console.log(`[PlantGrowthDisplayWrapper] TX status:`, JSON.stringify({
+          slot: txStatus.value?.slot,
+          confirmations: txStatus.value?.confirmations,
+          confirmationStatus: txStatus.value?.confirmationStatus,
+          err: txStatus.value?.err,
+        }))
+        if (txStatus.value?.err) {
+          console.error(`[PlantGrowthDisplayWrapper] Harvest TX failed on-chain!`, txStatus.value.err)
+          throw new Error(`Transaction failed on-chain: ${JSON.stringify(txStatus.value.err)}`)
+        }
+      } catch (statusErr: any) {
+        console.error('[PlantGrowthDisplayWrapper] Failed to get TX status:', statusErr.message)
+        // Don't throw - continue with refresh attempts
       }
       
-      // STEP 3: Wait for subscription to fire (primary update mechanism)
+      // Add a small delay after confirmation to ensure RPC state is fully propagated
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // STEP 4: Wait for subscription to fire (primary update mechanism)
       // Reset the subscription fired flag
       subscriptionFiredRef.current = false
       
-      // Set timeout: if subscription doesn't fire within 1 second, do manual refresh
-      setTimeout(async () => {
-        if (!subscriptionFiredRef.current) {
-          try {
-            // Use 'confirmed' commitment to match transaction confirmation level
-            const confirmedGrowState = await client.getGrowState(matchIdentity.u64, 'confirmed')
-            if (confirmedGrowState) {
+      // Manual refresh function with retry logic (similar to plant handler)
+      // CRITICAL: Use 'confirmed' commitment to match the transaction confirmation level
+      const doManualRefresh = async (attempt: number = 1, maxAttempts: number = 6) => {
+        console.log(`[PlantGrowthDisplayWrapper] Harvest refresh attempt ${attempt}/${maxAttempts}, subscriptionFired:`, subscriptionFiredRef.current)
+        if (subscriptionFiredRef.current) {
+          console.log('[PlantGrowthDisplayWrapper] Subscription already fired, skipping manual refresh')
+          return
+        }
+        
+        try {
+          // Use 'confirmed' commitment to match transaction confirmation level
+          const confirmedGrowState = await client.getGrowState(matchIdentity.u64, 'confirmed')
+          if (confirmedGrowState) {
+            // Log the specific slot that was harvested (slotIndex is captured in closure)
+            const isPlayerA = solanaWallets?.[0]?.address === confirmedGrowState.playerA?.toString()
+            const relevantSlots = isPlayerA ? confirmedGrowState.playerASlots : confirmedGrowState.playerBSlots
+            const harvestedSlot = relevantSlots?.[slotIndex]
+            console.log(`[PlantGrowthDisplayWrapper] Harvest refresh got state for slot ${slotIndex}:`,
+              'plantState:', JSON.stringify(harvestedSlot?.plantState)
+            )
+            
+            // Check if the slot shows as empty (harvested)
+            const isNowEmpty = harvestedSlot?.plantState?.__kind === 'Empty' || 
+                               harvestedSlot?.plantState?.empty !== undefined ||
+                               !harvestedSlot?.occupied
+            
+            if (!isNowEmpty && attempt < maxAttempts) {
+              // Exponential backoff: 500ms, 1000ms, 1500ms, 2000ms, 2500ms
+              const delay = Math.min(500 + (attempt * 500), 2500)
+              console.log(`[PlantGrowthDisplayWrapper] Slot ${slotIndex} still not empty after harvest, retrying in ${delay}ms...`)
+              setTimeout(() => doManualRefresh(attempt + 1, maxAttempts), delay)
+            } else {
+              // Either slot is empty or we've exhausted retries - update tracker
+              console.log(`[PlantGrowthDisplayWrapper] Updating grow state tracker after harvest (attempt ${attempt}, isEmpty: ${isNowEmpty})`)
               growSlotTracker.updateGrowState(confirmedGrowState)
+              
+              // If still not empty after all retries, log a warning
+              if (!isNowEmpty) {
+                console.warn(`[PlantGrowthDisplayWrapper] Slot ${slotIndex} still shows as not empty after ${maxAttempts} attempts. Transaction may have failed silently or RPC is severely delayed.`)
+              }
             }
-          } catch (refreshError) {
-            console.error('[PlantGrowthDisplayWrapper] Error refreshing grow state after harvest:', refreshError)
+          } else {
+            console.warn('[PlantGrowthDisplayWrapper] Harvest refresh returned null state')
+            if (attempt < maxAttempts) {
+              const delay = Math.min(500 + (attempt * 500), 2500)
+              setTimeout(() => doManualRefresh(attempt + 1, maxAttempts), delay)
+            }
+          }
+        } catch (refreshError) {
+          console.error('[PlantGrowthDisplayWrapper] Error refreshing grow state after harvest:', refreshError)
+          if (attempt < maxAttempts) {
+            const delay = Math.min(500 + (attempt * 500), 2500)
+            setTimeout(() => doManualRefresh(attempt + 1, maxAttempts), delay)
           }
         }
-      }, 1000)
+      }
+      
+      // Start first manual refresh after a brief delay
+      // The 500ms delay after confirmation + this 1000ms delay gives RPC time to propagate
+      setTimeout(() => doManualRefresh(1, 6), 1000)
+      
     } catch (error: any) {
       console.error('[PlantGrowthDisplayWrapper] Harvest failed:', error)
       
       // Provide more helpful error messages
       let errorMessage = 'Failed to harvest strain'
       if (error.message) {
-        if (error.message.includes('SlotEmpty')) {
-          errorMessage = 'This slot is empty. There is nothing to harvest.'
+        if (error.message.includes('SlotEmpty') || error.message.includes('AlreadyHarvested')) {
+          errorMessage = 'This plant has already been harvested. The slot is now empty.'
+          // Force a state refresh since the slot is actually empty
+          try {
+            const connection = createSolanaConnection('confirmed')
+            const wallet = await createWalletFromPrivyWallet(solanaWallets[0], signTransaction)
+            const client = await DroogGameClient.create(connection, wallet)
+            const matchIdentity = await createMatchIdentity(matchIdString)
+            const confirmedGrowState = await client.getGrowState(matchIdentity.u64, 'confirmed')
+            if (confirmedGrowState) {
+              console.log('[PlantGrowthDisplayWrapper] Force refreshing state after AlreadyHarvested error')
+              growSlotTracker.updateGrowState(confirmedGrowState)
+            }
+          } catch (refreshError) {
+            console.error('[PlantGrowthDisplayWrapper] Error force refreshing after AlreadyHarvested:', refreshError)
+          }
         } else if (error.message.includes('GrowthTimeNotElapsed')) {
           errorMessage = 'Plant is not ready yet. Please wait for it to finish growing.'
         } else if (error.message.includes('InventoryFull')) {
@@ -414,6 +502,195 @@ export function PlantGrowthDisplayWrapper() {
       }
       
       alert(errorMessage)
+    }
+  }, [matchIdString, playerA, playerB, solanaWallets, signTransaction])
+
+  // Handle delivery action (sell to customer)
+  // NOTE: This is the client-side handler. Solana is the SOLE AUTHORITY.
+  // If on-chain validation fails, the transaction will be rejected.
+  const handleDelivery = useCallback(async (customerIndex: number, strainLevel: 1 | 2 | 3) => {
+    // Validate all required data is available
+    if (!matchIdString) {
+      const errorMsg = 'Match ID not available. Please wait for match to initialize.'
+      console.error('[PlantGrowthDisplayWrapper]', errorMsg)
+      throw new Error(errorMsg)
+    }
+
+    if (!playerA || !playerB) {
+      const errorMsg = 'Player information not available. Please wait for match to initialize.'
+      console.error('[PlantGrowthDisplayWrapper]', errorMsg, {
+        playerA: playerA?.toBase58(),
+        playerB: playerB?.toBase58(),
+      })
+      throw new Error(errorMsg)
+    }
+
+    if (!solanaWallets || solanaWallets.length === 0) {
+      const errorMsg = 'No Solana wallet available. Please connect your wallet.'
+      console.error('[PlantGrowthDisplayWrapper]', errorMsg)
+      throw new Error(errorMsg)
+    }
+
+    // Validate customerIndex
+    if (customerIndex < 0 || customerIndex > 22) {
+      const errorMsg = `Invalid customer index: ${customerIndex}. Must be between 0 and 22.`
+      console.error('[PlantGrowthDisplayWrapper]', errorMsg)
+      throw new Error(errorMsg)
+    }
+
+    // Validate strain level
+    if (strainLevel < 1 || strainLevel > 3) {
+      const errorMsg = `Invalid strain level: ${strainLevel}. Must be 1, 2, or 3.`
+      console.error('[PlantGrowthDisplayWrapper]', errorMsg)
+      throw new Error(errorMsg)
+    }
+
+    console.log('[PlantGrowthDisplayWrapper] Starting delivery:', { customerIndex, strainLevel })
+
+    try {
+      const connection = createSolanaConnection('confirmed')
+      
+      // Create wallet from Privy
+      const wallet = await createWalletFromPrivyWallet(solanaWallets[0], signTransaction)
+      
+      // Create Solana client
+      const client = await DroogGameClient.create(connection, wallet)
+
+      // Get match identity for state fetching
+      const matchIdentity = await createMatchIdentity(matchIdString)
+      
+      // IMPORTANT: Refresh delivery slots before attempting to sell.
+      // The on-chain MatchDeliveryState only updates when refresh_delivery_slots is called.
+      // Without this, the client-side predicted availability may not match on-chain state.
+      console.log('[PlantGrowthDisplayWrapper] Refreshing delivery slots before sale...')
+      try {
+        const refreshTx = await client.refreshDeliverySlots(matchIdString, playerA, playerB)
+        console.log('[PlantGrowthDisplayWrapper] Delivery slots refreshed:', refreshTx)
+        // Wait briefly for confirmation
+        await connection.confirmTransaction(refreshTx, 'confirmed')
+        console.log('[PlantGrowthDisplayWrapper] Refresh confirmed')
+      } catch (refreshError: any) {
+        // Refresh may fail if:
+        // - 60s hasn't passed since last refresh (DeliveryRotationTooSoon)
+        // - Match ended
+        // These are acceptable - we still try the sale
+        if (refreshError.message?.includes('DeliveryRotationTooSoon')) {
+          console.log('[PlantGrowthDisplayWrapper] Delivery rotation not needed (still in same 60s bucket)')
+        } else {
+          console.warn('[PlantGrowthDisplayWrapper] Refresh failed (will still try sell):', refreshError.message)
+        }
+      }
+      
+      // Log on-chain delivery state for diagnostics
+      try {
+        const onChainDeliveryState = await client.getDeliveryState(matchIdentity.u64)
+        if (onChainDeliveryState) {
+          console.log('[PlantGrowthDisplayWrapper] On-chain delivery state:', {
+            availableCustomers: onChainDeliveryState.availableCustomers,
+            lastUpdateTs: onChainDeliveryState.lastUpdateTs,
+            targetCustomer: customerIndex,
+            isTargetAvailable: onChainDeliveryState.availableCustomers.includes(customerIndex)
+          })
+        } else {
+          console.warn('[PlantGrowthDisplayWrapper] No on-chain delivery state found!')
+        }
+      } catch (stateError) {
+        console.warn('[PlantGrowthDisplayWrapper] Could not fetch delivery state for diagnostics')
+      }
+      
+      // Send sellToCustomer transaction
+      // AUTHORITY: Solana validates all of the following on-chain:
+      // - Customer availability (MatchDeliveryState)
+      // - Strain compatibility with customer layer
+      // - Player has sufficient inventory
+      // - Match is active
+      console.log('[PlantGrowthDisplayWrapper] Calling sellToCustomer...')
+      const txSignature = await client.sellToCustomer(
+        matchIdString,
+        playerA,
+        playerB,
+        customerIndex,
+        strainLevel
+      )
+      console.log('[PlantGrowthDisplayWrapper] sellToCustomer returned txSignature:', txSignature)
+      
+      // Wait for transaction confirmation
+      console.log('[PlantGrowthDisplayWrapper] Waiting for confirmation...')
+      try {
+        await connection.confirmTransaction(txSignature, 'confirmed')
+        console.log('[PlantGrowthDisplayWrapper] Delivery transaction confirmed!')
+        
+        // Verify transaction succeeded
+        const txDetails = await connection.getTransaction(txSignature, {
+          commitment: 'confirmed',
+          maxSupportedTransactionVersion: 0
+        })
+        if (txDetails?.meta?.err) {
+          console.error('[PlantGrowthDisplayWrapper] Delivery transaction failed:', txDetails.meta.err)
+          throw new Error('Delivery transaction failed on-chain')
+        }
+        console.log('[PlantGrowthDisplayWrapper] Delivery verified on-chain!')
+      } catch (confirmError: any) {
+        console.warn('[PlantGrowthDisplayWrapper] Confirmation error (may still succeed):', confirmError.message)
+        // Wait a bit for propagation
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+      
+      // Add delay to ensure RPC state is propagated
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Refresh grow state to update inventory display
+      const refreshedGrowState = await client.getGrowState(matchIdentity.u64, 'confirmed')
+      if (refreshedGrowState) {
+        console.log('[PlantGrowthDisplayWrapper] Updated inventory after delivery')
+        growSlotTracker.updateGrowState(refreshedGrowState)
+      }
+      
+      // Hide the delivery indicator for this customer
+      // The customer is now unavailable for the rest of this rotation cycle
+      deliveryIndicatorManager.markCustomerDelivered(customerIndex)
+      
+      // Refresh match state to update scoreboard
+      try {
+        const refreshedMatchState = await client.checkMatchPDAExists(matchIdString, playerA, playerB, 'confirmed')
+        if (refreshedMatchState && 'playerASales' in refreshedMatchState) {
+          setPlayerASales(refreshedMatchState.playerASales as number)
+          setPlayerBSales(refreshedMatchState.playerBSales as number)
+          setPlayerAReputation(refreshedMatchState.playerAReputation as number)
+          setPlayerBReputation(refreshedMatchState.playerBReputation as number)
+          console.log('[PlantGrowthDisplayWrapper] Updated scoreboard after delivery')
+        }
+      } catch (scoreboardError) {
+        console.warn('[PlantGrowthDisplayWrapper] Could not refresh scoreboard:', scoreboardError)
+      }
+      
+    } catch (error: any) {
+      console.error('[PlantGrowthDisplayWrapper] Delivery failed:', error)
+      
+      // Provide more helpful error messages
+      let errorMessage = 'Failed to complete delivery'
+      if (error.message) {
+        if (error.message.includes('CustomerNotAvailableForDelivery')) {
+          errorMessage = 'This customer is not currently available for delivery. Wait for rotation.'
+        } else if (error.message.includes('InvalidStrainLevel')) {
+          errorMessage = 'This strain level is not compatible with this customer.'
+        } else if (error.message.includes('InsufficientInventory')) {
+          errorMessage = 'You do not have this strain in your inventory.'
+        } else if (error.message.includes('CustomerOnCooldown')) {
+          errorMessage = 'This customer was recently served. Wait for cooldown.'
+        } else if (error.message.includes('MatchNotStarted')) {
+          errorMessage = 'Match has not started yet. Please wait for the match to begin.'
+        } else if (error.message.includes('MatchEnded')) {
+          errorMessage = 'Match has ended. Cannot make deliveries.'
+        } else if (error.message.includes('MatchAlreadyFinalized')) {
+          errorMessage = 'Match has been finalized. Cannot make deliveries.'
+        } else {
+          errorMessage = `Failed to deliver: ${error.message}`
+        }
+      }
+      
+      alert(errorMessage)
+      throw error // Re-throw so the modal knows it failed
     }
   }, [matchIdString, playerA, playerB, solanaWallets, signTransaction])
 
@@ -557,7 +834,10 @@ export function PlantGrowthDisplayWrapper() {
           setIsLoading(false)
 
           // Set up subscriptions after match state is found
-          subscribeToGrowState()
+          // Pass matchIdString and player pubkeys explicitly to avoid React state closure issues
+          subscribeToGrowState(matchIdString)
+          subscribeToMatchState(matchIdString)  // Subscribe to match state for real-time scoreboard updates
+          setupReconciliation(matchIdString, playerAPubkey, playerBPubkey)
         }
       } catch (error) {
         // Silently continue polling - match might not be initialized yet
@@ -565,11 +845,16 @@ export function PlantGrowthDisplayWrapper() {
     }
 
     // Initialize connection and fetch match state
-    const initializeMatchData = async () => {
+    // Returns match data needed for subscriptions to avoid React state closure issues
+    const initializeMatchData = async (): Promise<{
+      matchId: string
+      playerA: PublicKey
+      playerB: PublicKey
+    } | null> => {
       const identity = identityStore.getIdentity()
       if (!identity) {
         setIsLoading(false)
-        return
+        return null
       }
 
       // Check if demo mode
@@ -587,13 +872,13 @@ export function PlantGrowthDisplayWrapper() {
         growSlotTracker.updateGrowState(mocked.growState)
         growSlotTracker.setMatchTiming(mocked.matchStartTs, mocked.matchEndTs)
         setIsLoading(false)
-        return
+        return null  // Demo mode doesn't need subscriptions
       }
 
       // Live match: fetch from chain
       if (!identity.matchId) {
         setIsLoading(false)
-        return
+        return null
       }
 
       // Store matchId as a local variable to satisfy TypeScript narrowing
@@ -699,9 +984,24 @@ export function PlantGrowthDisplayWrapper() {
           if (growState) {
             growSlotTracker.updateGrowState(growState)
           }
+          
+          // Update scoreboard stats from match state
+          if ('playerASales' in matchState) {
+            setPlayerASales(matchState.playerASales as number)
+            setPlayerBSales(matchState.playerBSales as number)
+            setPlayerAReputation(matchState.playerAReputation as number)
+            setPlayerBReputation(matchState.playerBReputation as number)
+          }
 
           hasFetchedMatchData = true
           setIsLoading(false)
+          
+          // Return match data for subscriptions
+          return {
+            matchId: currentMatchId,
+            playerA: playerAPubkey,
+            playerB: playerBPubkey
+          }
         } else {
           setIsLoading(false)
           
@@ -713,6 +1013,7 @@ export function PlantGrowthDisplayWrapper() {
               pollMatchState(currentMatchId)
             }, 2000) // Poll every 2 seconds
           }
+          return null
         }
       } catch (error) {
         console.error('[PlantGrowthDisplayWrapper] Error initializing match data:', error)
@@ -726,17 +1027,20 @@ export function PlantGrowthDisplayWrapper() {
             pollMatchState(currentMatchId)
           }, 2000)
         }
+        return null
       }
     }
 
     // Subscribe to grow state changes
-    const subscribeToGrowState = async () => {
-      if (!connection || !solanaClient || !matchIdString || isDemoMode) {
+    // Note: matchId is passed as parameter to avoid React state closure issues
+    const subscribeToGrowState = async (matchId?: string) => {
+      const effectiveMatchId = matchId || matchIdString
+      if (!connection || !solanaClient || !effectiveMatchId || isDemoMode) {
         return
       }
 
       try {
-        const matchIdentity = await createMatchIdentity(matchIdString)
+        const matchIdentity = await createMatchIdentity(effectiveMatchId)
         const [growStatePDA] = DroogGameClient.deriveGrowStatePDA(matchIdentity.u64)
 
         growSubscriptionId = connection.onAccountChange(
@@ -990,29 +1294,121 @@ export function PlantGrowthDisplayWrapper() {
       }
     }
 
+    // Subscribe to match state changes (for real-time scoreboard updates)
+    // Note: matchId is passed as parameter to avoid React state closure issues
+    const subscribeToMatchState = async (matchId?: string) => {
+      const effectiveMatchId = matchId || matchIdString
+      if (!connection || !solanaClient || !effectiveMatchId || isDemoMode) {
+        return
+      }
+
+      try {
+        const matchIdentity = await createMatchIdentity(effectiveMatchId)
+        const [matchPDA] = DroogGameClient.deriveMatchPDA(matchIdentity.u64)
+
+        console.log('[PlantGrowthDisplayWrapper] Setting up match state subscription for scoreboard...')
+        
+        matchSubscriptionId = connection.onAccountChange(
+          matchPDA,
+          async (accountInfo, context) => {
+            console.log('[PlantGrowthDisplayWrapper] Match state subscription fired! Slot:', context.slot)
+            
+            try {
+              // Decode match state from account data
+              const matchStateRaw = (solanaClient as any).program.coder.accounts.decode(
+                'matchState',
+                accountInfo.data
+              ) as any
+              
+              // Extract sales and reputation with BN handling
+              const playerASalesValue = matchStateRaw.playerASales?.toNumber 
+                ? matchStateRaw.playerASales.toNumber() 
+                : (matchStateRaw.playerASales ?? 0)
+              const playerBSalesValue = matchStateRaw.playerBSales?.toNumber 
+                ? matchStateRaw.playerBSales.toNumber() 
+                : (matchStateRaw.playerBSales ?? 0)
+              const playerARepValue = matchStateRaw.playerAReputation?.toNumber 
+                ? matchStateRaw.playerAReputation.toNumber() 
+                : (matchStateRaw.playerAReputation ?? 0)
+              const playerBRepValue = matchStateRaw.playerBReputation?.toNumber 
+                ? matchStateRaw.playerBReputation.toNumber() 
+                : (matchStateRaw.playerBReputation ?? 0)
+              
+              console.log('[PlantGrowthDisplayWrapper] Scoreboard update from subscription:', {
+                playerASales: playerASalesValue,
+                playerBSales: playerBSalesValue,
+                playerARep: playerARepValue,
+                playerBRep: playerBRepValue
+              })
+              
+              setPlayerASales(playerASalesValue)
+              setPlayerBSales(playerBSalesValue)
+              setPlayerAReputation(playerARepValue)
+              setPlayerBReputation(playerBRepValue)
+            } catch (error: any) {
+              console.warn('[PlantGrowthDisplayWrapper] Match state decode error:', error?.message)
+            }
+          },
+          'confirmed'
+        )
+        
+        console.log('[PlantGrowthDisplayWrapper] Match state subscription ID:', matchSubscriptionId)
+      } catch (error) {
+        console.error('[PlantGrowthDisplayWrapper] Error subscribing to match state:', error)
+      }
+    }
+
     // Set up periodic reconciliation (recover from dropped subscriptions)
-    const setupReconciliation = async () => {
-      if (!solanaClient || !matchIdString || isDemoMode) {
+    // Note: matchId and player pubkeys are passed as parameters to avoid React state closure issues
+    const setupReconciliation = async (matchId?: string, playerAPubkey?: PublicKey, playerBPubkey?: PublicKey) => {
+      const effectiveMatchId = matchId || matchIdString
+      const effectivePlayerA = playerAPubkey || playerA
+      const effectivePlayerB = playerBPubkey || playerB
+      
+      if (!solanaClient || !effectiveMatchId || isDemoMode) {
         return
       }
       
       try {
-        const matchIdentity = await createMatchIdentity(matchIdString)
+        const matchIdentity = await createMatchIdentity(effectiveMatchId)
+        
+        // Grow state reconciliation (less frequent - 45 seconds)
         reconciliationInterval = setInterval(async () => {
           if (solanaClient && matchIdentity) {
             await growSlotTracker.reconcileFromChain(solanaClient, matchIdentity.u64)
           }
-        }, 45000) // Reconcile every 45 seconds (middle of 30-60s range)
+        }, 45000) // Reconcile grow state every 45 seconds
+        
+        // Scoreboard polling (more frequent - 5 seconds)
+        // WebSocket subscriptions can drop, so we poll as a reliable fallback
+        // This ensures opponent score updates are always captured
+        subscriptionFallbackPolling = setInterval(async () => {
+          if (solanaClient && effectivePlayerA && effectivePlayerB) {
+            try {
+              const matchState = await solanaClient.checkMatchPDAExists(effectiveMatchId, effectivePlayerA, effectivePlayerB, 'confirmed')
+              if (matchState && 'playerASales' in matchState) {
+                setPlayerASales(matchState.playerASales as number)
+                setPlayerBSales(matchState.playerBSales as number)
+                setPlayerAReputation(matchState.playerAReputation as number)
+                setPlayerBReputation(matchState.playerBReputation as number)
+              }
+            } catch (scoreErr) {
+              // Silently ignore scoreboard refresh errors
+            }
+          }
+        }, 5000) // Poll scoreboard every 5 seconds for reliable opponent updates
       } catch (error) {
         console.error('[PlantGrowthDisplayWrapper] Error setting up reconciliation:', error)
       }
     }
 
     // Initial setup
-    initializeMatchData().then(() => {
-      if (hasFetchedMatchData && !isDemoMode) {
-        subscribeToGrowState()
-        setupReconciliation()
+    initializeMatchData().then((matchData) => {
+      if (hasFetchedMatchData && !isDemoMode && matchData) {
+        // Pass matchId and player pubkeys explicitly to avoid React state closure issues
+        subscribeToGrowState(matchData.matchId)
+        subscribeToMatchState(matchData.matchId)  // Subscribe to match state for real-time scoreboard updates
+        setupReconciliation(matchData.matchId, matchData.playerA, matchData.playerB)
       }
     })
 
@@ -1107,12 +1503,51 @@ export function PlantGrowthDisplayWrapper() {
           matchEndTs={matchEndTs}
         />
       )}
+      
+      {/* Match scoreboard - shows both players' sales and reputation */}
+      {matchStartTs && matchEndTs && playerA && playerB && !isDemoMode && (
+        <MatchScoreboard
+          playerA={{
+            sales: playerASales,
+            reputation: playerAReputation,
+            isCurrentPlayer: solanaWallets?.[0]?.address === playerA.toBase58(),
+            publicKey: playerA
+          }}
+          playerB={{
+            sales: playerBSales,
+            reputation: playerBReputation,
+            isCurrentPlayer: solanaWallets?.[0]?.address === playerB.toBase58(),
+            publicKey: playerB
+          }}
+          matchActive={true}
+        />
+      )}
+      
+      {/* Match end modal - shows when match time runs out */}
+      {matchStartTs && matchEndTs && playerA && playerB && matchIdString && !isDemoMode && (
+        <MatchEndModalManager
+          matchStartTs={matchStartTs}
+          matchEndTs={matchEndTs}
+          playerA={playerA}
+          playerB={playerB}
+          playerASales={playerASales}
+          playerBSales={playerBSales}
+          playerAReputation={playerAReputation}
+          playerBReputation={playerBReputation}
+          matchIdString={matchIdString}
+        />
+      )}
 
-      {/* Always render modal manager - it handles its own visibility */}
+      {/* Always render modal managers - they handle their own visibility */}
       <GrowSlotPlantingModalManager
         matchStartTs={matchStartTs || 0}
         matchEndTs={matchEndTs || 0}
         onPlant={handlePlant}
+      />
+      
+      {/* Delivery modal manager - for city scene deliveries */}
+      <DeliveryModalManager
+        onDelivery={handleDelivery}
       />
       
       {/* Plant growth display - shown only when in grow room */}
@@ -1136,6 +1571,9 @@ export function PlantGrowthDisplayWrapper() {
           onHarvest={handleHarvest}
         />
       )}
+
+      {/* Mobile controls - joystick, sprint, interact, inventory */}
+      <MobileControls onInventoryToggle={() => setIsInventoryOpen(prev => !prev)} />
     </>
   )
 }

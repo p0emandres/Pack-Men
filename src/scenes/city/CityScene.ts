@@ -3,8 +3,16 @@ import type { PlayerIdentity } from '../../types/identity'
 import { CityPresenceClient, type PlayerPresenceData } from './CityPresenceClient'
 import { CityEntities } from './CityEntities'
 import { CityRenderer } from './CityRenderer'
+import { CopEntities, type CaptureEvent } from './CopEntities'
 import { deliveryIndicatorManager } from '../../game/deliveryIndicators'
 import { createMatchIdentity } from '../../game/matchIdentity'
+import { 
+  smellAggregator, 
+  copPhaseSystem, 
+  captureSystem,
+  type SmellTier 
+} from '../../game/copSystem'
+import type { PlayerTarget } from '../../game/copSystem/copPersonalities'
 
 /**
  * Callback to get current player state for presence updates.
@@ -34,10 +42,15 @@ export class CityScene {
   private presenceClient: CityPresenceClient
   private entities: CityEntities
   private cityRenderer: CityRenderer
+  private copEntities: CopEntities
   private getPlayerState: GetPlayerStateCallback | null = null
   private isInitialized = false
   private isPaused = false
   private isDestroyed = false
+  
+  // Cop system state
+  private currentSmellTier: SmellTier = 'TIER_0'
+  private copsInitialized = false
 
   constructor(
     scene: THREE.Scene,
@@ -56,6 +69,12 @@ export class CityScene {
     this.entities = new CityEntities(scene, identity.matchId || undefined)
     this.cityRenderer = new CityRenderer(scene, camera, renderer, this.entities, mainMapGroup)
     this.presenceClient = new CityPresenceClient(identity.matchId || '', identity)
+    this.copEntities = new CopEntities(scene, renderer)
+    
+    // Setup capture event listener for cop system
+    this.copEntities.addCaptureListener((event: CaptureEvent) => {
+      this.handleCaptureEvent(event)
+    })
 
     // Setup presence update callback with server timestamp
     this.presenceClient.onPresenceUpdate((presences, serverTs) => {
@@ -138,9 +157,84 @@ export class CityScene {
       // This prevents sending room positions when player is still in a room
     }
 
+    // Initialize cop entities
+    this.copEntities.initialize().then(async () => {
+      console.log('[CityScene] Cop entities initialized')
+      
+      // Set local player ID for targeting
+      if (this.identity.privyUserId) {
+        this.copEntities.setLocalPlayerId(this.identity.privyUserId)
+        captureSystem.setLocalPlayerId(this.identity.privyUserId)
+      }
+      
+      this.copsInitialized = true
+      
+      // Check if this is demo mode (demo identities have privyUserId starting with "demo-user")
+      const isDemoMode = this.identity.privyUserId.startsWith('demo-user')
+      
+      if (isDemoMode) {
+        // Demo mode: spawn a fixed set of demo cops
+        await this.copEntities.spawnDemoCops()
+        console.log('[CityScene] Demo cops spawned automatically')
+      } else {
+        // Multiplayer mode: spawn initial cops based on TIER_0
+        // Cops will be updated when smell tier changes via updateSmellTier()
+        await this.copEntities.spawnCopsForTier('TIER_0')
+        console.log('[CityScene] Initial TIER_0 cops spawned')
+      }
+    }).catch((error) => {
+      console.error('[CityScene] Failed to initialize cop entities:', error)
+    })
+
     this.isInitialized = true
     this.isPaused = false
     console.log('[CityScene] Initialized')
+  }
+  
+  /**
+   * Handle capture event from cop entities.
+   * Forwards to captureSystem which handles timeout and respawn.
+   */
+  private handleCaptureEvent(event: CaptureEvent): void {
+    console.log(`[CityScene] Capture event: ${event.copPersonality} captured player ${event.capturedPlayerId}`)
+    captureSystem.handleCapture(event)
+  }
+  
+  /**
+   * Update cop budget based on smell tier.
+   * Called when smell tier changes (from grow state subscription).
+   */
+  updateSmellTier(tier: SmellTier): void {
+    if (tier === this.currentSmellTier) {
+      return // No change
+    }
+    
+    console.log(`[CityScene] Smell tier changed: ${this.currentSmellTier} -> ${tier}`)
+    this.currentSmellTier = tier
+    
+    if (this.copsInitialized) {
+      this.copEntities.spawnCopsForTier(tier)
+    }
+  }
+  
+  /**
+   * Spawn demo cops for single-player/demo mode.
+   */
+  async spawnDemoCops(): Promise<void> {
+    if (!this.copsInitialized) {
+      // Wait for cop initialization
+      await this.copEntities.initialize()
+      
+      if (this.identity.privyUserId) {
+        this.copEntities.setLocalPlayerId(this.identity.privyUserId)
+        captureSystem.setLocalPlayerId(this.identity.privyUserId)
+      }
+      
+      this.copsInitialized = true
+    }
+    
+    await this.copEntities.spawnDemoCops()
+    console.log('[CityScene] Demo cops spawned')
   }
 
   /**
@@ -393,6 +487,9 @@ export class CityScene {
     // Destroy entities
     this.entities.destroy()
 
+    // Destroy cop entities
+    this.copEntities.destroy()
+
     // Destroy renderer
     this.cityRenderer.destroy()
 
@@ -400,6 +497,11 @@ export class CityScene {
     if (deliveryIndicatorManager.isInitialized) {
       deliveryIndicatorManager.destroy()
     }
+    
+    // Clear cop system state
+    smellAggregator.clear()
+    copPhaseSystem.clear()
+    captureSystem.reset()
 
     console.log('[CityScene] Destroyed')
   }
@@ -439,6 +541,70 @@ export class CityScene {
       if (deliveryIndicatorManager.isInitialized) {
         deliveryIndicatorManager.update(deltaTime)
       }
+      
+      // Update cop system
+      if (this.copsInitialized) {
+        // Update phase system (fires phase change events)
+        copPhaseSystem.update()
+        
+        // Build player targets for cop AI
+        const playerTargets = this.buildPlayerTargets()
+        this.copEntities.setPlayers(playerTargets)
+        
+        // Update cop movement and capture detection
+        this.copEntities.update(deltaTime)
+        
+        // Update capture system (handles timeout expiration)
+        const respawnResult = captureSystem.update()
+        if (respawnResult.shouldRespawn && respawnResult.respawnPosition) {
+          // Dispatch respawn event for scene.ts to handle teleport
+          window.dispatchEvent(new CustomEvent('playerRespawn', {
+            detail: { position: respawnResult.respawnPosition }
+          }))
+        }
+      }
     }
+  }
+  
+  /**
+   * Build player target list for cop targeting.
+   * Includes local player and remote players from presence.
+   */
+  private buildPlayerTargets(): PlayerTarget[] {
+    const targets: PlayerTarget[] = []
+    
+    // Add local player
+    if (this.getPlayerState) {
+      const localState = this.getPlayerState()
+      const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        localState.rotation
+      )
+      targets.push({
+        playerId: this.identity.privyUserId,
+        position: new THREE.Vector3(
+          localState.position.x,
+          localState.position.y,
+          localState.position.z
+        ),
+        forward,
+      })
+    }
+    
+    // Add remote players from entities
+    const avatarPositions = this.entities.getAllAvatarPositions()
+    for (const { playerId, position, rotation } of avatarPositions) {
+      const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        rotation
+      )
+      targets.push({
+        playerId,
+        position: position.clone(),
+        forward,
+      })
+    }
+    
+    return targets
   }
 }

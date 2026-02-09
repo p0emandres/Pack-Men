@@ -765,6 +765,22 @@ export class CityEntities {
   hasAvatar(playerId: string): boolean {
     return this.avatars.has(playerId)
   }
+  
+  /**
+   * Get all avatar positions and rotations for cop targeting.
+   * Returns position and forward direction for each remote player.
+   */
+  getAllAvatarPositions(): { playerId: string; position: THREE.Vector3; rotation: number }[] {
+    const result: { playerId: string; position: THREE.Vector3; rotation: number }[] = []
+    for (const [playerId, avatar] of this.avatars.entries()) {
+      result.push({
+        playerId,
+        position: avatar.renderedPosition.clone(),
+        rotation: avatar.renderedRotation,
+      })
+    }
+    return result
+  }
 
   /**
    * Check if an avatar is currently being spawned for a player.

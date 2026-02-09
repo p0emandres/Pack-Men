@@ -7,6 +7,15 @@ import type { PlayerIdentity } from './types/identity';
 import { identityStore } from './game/identityStore';
 import { CityScene } from './scenes/city/CityScene.js';
 import { growSlotIndicatorManagerA, growSlotIndicatorManagerB } from './game/growSlotIndicators';
+import { deliveryIndicatorManager } from './game/deliveryIndicators';
+import { captureSystem } from './game/copSystem';
+import { audioManager } from './game/audioManager';
+import { 
+    registerMobileControlEvents, 
+    registerInteractionCallback, 
+    registerGameActiveCallback,
+    type InteractionState 
+} from './components/MobileControls';
 // WebRTC message format types available in ./types/webrtc.ts
 // All WebRTC messages MUST include peerToken and privyUserId for security
 
@@ -918,6 +927,11 @@ const keys: { [key: string]: boolean } = {};
 const walkSpeed = 5; // units per second (normal walking speed)
 const runSpeed = 10; // units per second (running speed when shift is held)
 const rotationSpeed = 5; // radians per second
+
+// Mobile joystick input state (normalized -1 to 1)
+let mobileJoystickX = 0;
+let mobileJoystickY = 0;
+let mobileJoystickActive = false;
 
 /**
  * Determine which character model to load based on player index in match.
@@ -4322,10 +4336,13 @@ function enterRoom(roomId: number): void {
     // Determine scene type based on room ID
     if (roomId === 1) {
         currentSceneType = 'growRoomA';
+        audioManager.setScene('growRoomA');
     } else if (roomId === 2) {
         currentSceneType = 'growRoomB';
+        audioManager.setScene('growRoomB');
     } else {
         currentSceneType = null;
+        audioManager.setScene(null);
     }
     
     // Remove main map from scene for performance (don't render world when in room)
@@ -4419,9 +4436,11 @@ function getPlayerState(): { position: { x: number; y: number; z: number }; rota
         };
     }
 
-    // Determine animation state based on current actions
+    // Determine animation state based on current actions (keyboard or mobile joystick)
     let animationState: 'idle' | 'walk' | 'run' = 'idle';
-    const isMoving = keys['w'] || keys['s'] || keys['a'] || keys['d'];
+    const isKeyboardMoving = keys['w'] || keys['s'] || keys['a'] || keys['d'];
+    const isMobileMoving = mobileJoystickActive && (Math.abs(mobileJoystickX) > 0.1 || Math.abs(mobileJoystickY) > 0.1);
+    const isMoving = isKeyboardMoving || isMobileMoving;
     const isRunning = keys['shift'];
     
     if (isMoving) {
@@ -4439,11 +4458,78 @@ function getPlayerState(): { position: { x: number; y: number; z: number }; rota
     };
 }
 
+/**
+ * Get the current interaction state for mobile controls.
+ * Determines what action is available based on player proximity to interactable objects.
+ */
+function getInteractionState(): InteractionState {
+    if (!farmer) {
+        return { type: null };
+    }
+    
+    const playerPosition = farmer.position.clone();
+    
+    // Check if player is in a room
+    if (currentRoomId !== null) {
+        const room = rooms.get(currentRoomId);
+        if (room) {
+            // Check if near exit indicator (door exit)
+            if (room.doorExitIndicatorPosition && room.doorExitIndicatorRadius) {
+                const exitDistance = Math.sqrt(
+                    Math.pow(playerPosition.x - room.doorExitIndicatorPosition.x, 2) +
+                    Math.pow(playerPosition.z - room.doorExitIndicatorPosition.z, 2)
+                );
+                if (exitDistance <= room.doorExitIndicatorRadius) {
+                    return { type: 'exit', roomId: currentRoomId };
+                }
+            }
+            
+            // Check if near grow slot indicator
+            const manager = currentRoomId === 1 ? growSlotIndicatorManagerA : growSlotIndicatorManagerB;
+            if (manager.isInitialized) {
+                const slotIndex = manager.checkProximity(playerPosition);
+                if (slotIndex !== null) {
+                    return { type: 'plant', slotIndex };
+                }
+            }
+        }
+        
+        return { type: null };
+    }
+    
+    // In city scene - check building entrances
+    for (const [roomId, roomData] of rooms.entries()) {
+        if (!roomData.indicatorPosition || !roomData.indicatorRadius) {
+            continue;
+        }
+        
+        const distance = Math.sqrt(
+            Math.pow(playerPosition.x - roomData.indicatorPosition.x, 2) +
+            Math.pow(playerPosition.z - roomData.indicatorPosition.z, 2)
+        );
+        
+        if (distance <= roomData.indicatorRadius) {
+            return { type: 'enter', roomId };
+        }
+    }
+    
+    // Check delivery indicators
+    if (deliveryIndicatorManager.isInitialized) {
+        const customerIndex = deliveryIndicatorManager.checkProximity(playerPosition);
+        if (customerIndex !== null) {
+            return { type: 'sell', customerIndex };
+        }
+    }
+    
+    return { type: null };
+}
+
 // Function to enter city scene
 function enterCityScene(): void {
     const identity = identityStore.getIdentity();
     if (!identity) {
         currentSceneType = 'city';
+        audioManager.setScene('city');
         return;
     }
 
@@ -4459,10 +4545,21 @@ function enterCityScene(): void {
             // Presence updates mode
         } else {
             currentSceneType = 'city';
+            audioManager.setScene('city');
             return;
         }
         cityScene = new CityScene(scene, camera, renderer, mainMapGroup, identity);
         cityScene.initialize(getPlayerState);
+    }
+    
+    // Set room position for capture system respawn
+    // Player respawns in their room (room 1) when capture timeout expires
+    const roomData = rooms.get(1);
+    if (roomData && identity.privyUserId) {
+        captureSystem.setPlayerRoomPosition(
+            identity.privyUserId,
+            roomData.exitPoint.clone()
+        );
     }
     
     // Always call enter() to ensure scene is resumed and updates are sent
@@ -4470,6 +4567,9 @@ function enterCityScene(): void {
     cityScene.enter();
 
     currentSceneType = 'city';
+    
+    // Switch to city music
+    audioManager.setScene('city');
 }
 
 // Function to exit city scene (when entering grow room)
@@ -4920,13 +5020,12 @@ function animateDoorExitIndicators(): void {
 let eKeyJustPressed = false;
 
 // Function to check if player is on entrance indicator and wants to enter
-function checkBuildingEntrance(): void {
-    if (!farmer || currentRoomId !== null) return; // Only check when in main map
+// Returns true if the player entered a building, false otherwise
+function checkBuildingEntrance(): boolean {
+    if (!farmer || currentRoomId !== null) return false; // Only check when in main map
     
     // Check if E key is pressed (only trigger once per key press)
     if (keys['e'] && !eKeyJustPressed) {
-        eKeyJustPressed = true;
-        
         for (const [roomId, roomData] of rooms.entries()) {
             if (!roomData.indicatorPosition || !roomData.indicatorRadius) {
                 continue;
@@ -4945,15 +5044,17 @@ function checkBuildingEntrance(): void {
             
             // Check if player is within the indicator radius
             if (distance <= roomData.indicatorRadius) {
+                eKeyJustPressed = true;
                 enterRoom(roomId);
                 keys['e'] = false;
-                return;
+                return true;
             }
         }
     } else if (!keys['e']) {
         // Reset flag when E key is released
         eKeyJustPressed = false;
     }
+    return false;
 }
 
 // Function to check if player wants to exit room (press E key when in door exit circle)
@@ -5047,6 +5148,36 @@ function checkGrowSlotInteraction(): void {
         // Dispatch event to open the planting modal
         const event = new CustomEvent('growSlotPlantingModalOpen', {
             detail: { slotIndex }
+        });
+        window.dispatchEvent(event);
+        // Prevent E key from triggering other actions
+        keys['e'] = false;
+    } else if (!keys['e']) {
+        // Reset flag when E key is released
+        eKeyJustPressed = false;
+    }
+}
+
+// Function to check if player wants to make a delivery (press E key when in delivery indicator circle)
+// NOTE: This is UI gating only. On-chain is the sole authority for delivery validation.
+function checkDeliveryInteraction(): void {
+    if (!farmer || currentRoomId !== null) return; // Only check when in city scene (not in a room)
+    
+    if (!deliveryIndicatorManager.isInitialized) {
+        return;
+    }
+    
+    // Check proximity to any available delivery indicator
+    const playerPosition = farmer.position.clone();
+    const customerIndex = deliveryIndicatorManager.checkProximity(playerPosition);
+    
+    // Check if player is near an available delivery indicator and E key is pressed
+    if (customerIndex !== null && keys['e'] && !eKeyJustPressed) {
+        console.log('[DeliveryInteraction] Triggering delivery modal for customerIndex:', customerIndex);
+        eKeyJustPressed = true;
+        // Dispatch event to open the delivery confirmation modal
+        const event = new CustomEvent('deliveryModalOpen', {
+            detail: { customerIndex }
         });
         window.dispatchEvent(event);
         // Prevent E key from triggering other actions
@@ -5300,6 +5431,26 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// Handle player respawn event (from cop capture system)
+// When capture timeout expires, teleport player back to their room
+window.addEventListener('playerRespawn', ((event: CustomEvent<{ position: THREE.Vector3 }>) => {
+    if (farmer && event.detail.position) {
+        // Force enter room 1 (player A's room) for respawn
+        // This is a safe zone where cops cannot enter
+        const roomData = rooms.get(1);
+        if (roomData) {
+            // Enter room 1
+            enterRoom(1);
+            console.log('[Scene] Player respawned in room after capture timeout');
+        } else {
+            // Fallback: just teleport to the position
+            farmer.position.copy(event.detail.position);
+            farmer.position.y = 0;
+            console.log('[Scene] Player respawned at fallback position');
+        }
+    }
+}) as EventListener);
+
 // Animation loop
 const clock = new THREE.Clock();
 
@@ -5334,6 +5485,15 @@ function animate(): void {
     
     // Handle character movement
     if (farmer) {
+        // Check if player is incapacitated (captured by cop)
+        const isIncapacitated = captureSystem.isLocalPlayerIncapacitated();
+        
+        // Apply camera shake effect if incapacitated
+        if (isIncapacitated) {
+            const shakeOffset = captureSystem.getCameraShakeOffset();
+            camera.position.add(shakeOffset);
+        }
+        
         // Camera-relative movement: use camera's forward/right vectors (yaw only, ignore pitch)
         // This ensures W always moves toward the center of the screen, matching player's mental model
         const cameraForward = new THREE.Vector3();
@@ -5348,23 +5508,33 @@ function animate(): void {
         cameraRight.crossVectors(cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
         
         // Build movement direction from camera-relative input
+        // Block all movement when incapacitated (player is in "jail")
         const moveDirection = new THREE.Vector3();
         
-        // W = forward (toward camera's look direction)
-        if (keys['w']) {
-            moveDirection.add(cameraForward);
-        }
-        // S = backward (away from camera's look direction)
-        if (keys['s']) {
-            moveDirection.sub(cameraForward);
-        }
-        // A = left (negative right vector)
-        if (keys['a']) {
-            moveDirection.sub(cameraRight);
-        }
-        // D = right (positive right vector)
-        if (keys['d']) {
-            moveDirection.add(cameraRight);
+        if (!isIncapacitated) {
+            // Handle mobile joystick input (takes priority if active)
+            if (mobileJoystickActive && (Math.abs(mobileJoystickX) > 0.1 || Math.abs(mobileJoystickY) > 0.1)) {
+                // Mobile joystick: X is left/right, Y is forward/back (already inverted in component)
+                moveDirection.add(cameraForward.clone().multiplyScalar(mobileJoystickY));
+                moveDirection.add(cameraRight.clone().multiplyScalar(mobileJoystickX));
+            } else {
+                // Keyboard input: W = forward (toward camera's look direction)
+                if (keys['w']) {
+                    moveDirection.add(cameraForward);
+                }
+                // S = backward (away from camera's look direction)
+                if (keys['s']) {
+                    moveDirection.sub(cameraForward);
+                }
+                // A = left (negative right vector)
+                if (keys['a']) {
+                    moveDirection.sub(cameraRight);
+                }
+                // D = right (positive right vector)
+                if (keys['d']) {
+                    moveDirection.add(cameraRight);
+                }
+            }
         }
         
         // Normalize movement direction for consistent speed in all directions
@@ -5455,10 +5625,14 @@ function animate(): void {
             controls.target.lerp(desiredTarget, lerpFactor);
         }
         
-        // Check for room entry/exit
+        // Check for room entry/exit and delivery interactions
         if (currentRoomId === null) {
             // Check if player is entering a building
-            checkBuildingEntrance();
+            const enteredBuilding = checkBuildingEntrance();
+            // Check for delivery interaction (only if building entrance didn't trigger)
+            if (!enteredBuilding) {
+                checkDeliveryInteraction();
+            }
         } else {
             // Check if player wants to exit room (check this first, has priority)
             const wasExiting = eKeyJustPressed;
@@ -5509,6 +5683,41 @@ export function initScene(identity: PlayerIdentity, container: HTMLElement): voi
     if (!container.contains(labelRenderer.domElement)) {
         container.appendChild(labelRenderer.domElement);
     }
+    
+    // Register mobile control handlers
+    registerMobileControlEvents({
+        onJoystickMove: (x: number, y: number) => {
+            mobileJoystickX = x;
+            mobileJoystickY = y;
+            mobileJoystickActive = true;
+        },
+        onJoystickEnd: () => {
+            mobileJoystickX = 0;
+            mobileJoystickY = 0;
+            mobileJoystickActive = false;
+        },
+        onRunStateChange: (isRunning: boolean) => {
+            keys['shift'] = isRunning;
+        },
+        onInteractPress: () => {
+            // Simulate E key press for interactions
+            keys['e'] = true;
+            // Reset after a short delay to mimic key release
+            setTimeout(() => {
+                keys['e'] = false;
+            }, 100);
+        },
+        onInventoryPress: () => {
+            // Inventory is handled by React component callback (onInventoryToggle)
+            // No action needed here since MobileControls calls onInventoryToggle directly
+        }
+    });
+    
+    // Register interaction callback for contextual interact button
+    registerInteractionCallback(getInteractionState);
+    
+    // Register game active callback
+    registerGameActiveCallback(() => !!farmer);
     
     // Validate identity cannot be modified at runtime
     Object.freeze(identity);

@@ -131,12 +131,40 @@ export class GrowSlotTracker {
       console.log('[GrowSlotTracker] GrowState playerB:', 
         typeof growState.playerB === 'string' ? growState.playerB : growState.playerB?.toBase58?.())
       
-      // Log each slot's state
-      growState.playerASlots?.forEach((slot: GrowSlot, i: number) => {
+      // Determine which player's slots to log
+      const playerAAddress = typeof growState.playerA === 'string' 
+        ? growState.playerA 
+        : growState.playerA?.toBase58?.()
+      const isPlayerA = playerAAddress === this.playerPubkey
+      const relevantSlots = isPlayerA ? growState.playerASlots : growState.playerBSlots
+      const playerLabel = isPlayerA ? 'A (YOU)' : 'B (YOU)'
+      
+      // Log current player's slot states with inventory info
+      relevantSlots?.forEach((slot: GrowSlot, i: number) => {
         const kind = slot.plantState?.__kind || 'unknown'
-        console.log(`[GrowSlotTracker] Player A Slot ${i}: ${kind}`, 
-          kind === 'Growing' ? `(strainLevel: ${(slot.plantState as any).strainLevel})` : '')
+        let details = ''
+        if (kind === 'Growing') {
+          details = `(strainLevel: ${(slot.plantState as any).strainLevel})`
+        } else if (kind === 'Ready') {
+          details = `(strainLevel: ${(slot.plantState as any).strainLevel})`
+        } else if (kind === 'Empty') {
+          // Check if this was recently harvested
+          const lastHarvested = slot.lastHarvestedTs
+          if (lastHarvested && typeof lastHarvested !== 'number') {
+            const ts = lastHarvested.toNumber ? lastHarvested.toNumber() : Number(lastHarvested)
+            if (ts > 0) {
+              details = `(last harvested: ${new Date(ts * 1000).toISOString()})`
+            }
+          } else if (typeof lastHarvested === 'number' && lastHarvested > 0) {
+            details = `(last harvested: ${new Date(lastHarvested * 1000).toISOString()})`
+          }
+        }
+        console.log(`[GrowSlotTracker] Player ${playerLabel} Slot ${i}: ${kind} ${details}`)
       })
+      
+      // Log inventory changes
+      const inventory = isPlayerA ? growState.playerAInventory : growState.playerBInventory
+      console.log(`[GrowSlotTracker] Player ${playerLabel} Inventory: L1=${inventory?.level1 || 0}, L2=${inventory?.level2 || 0}, L3=${inventory?.level3 || 0}`)
     }
     this.growState = growState
     this.notifyListeners()

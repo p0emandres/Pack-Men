@@ -49,7 +49,7 @@ pub enum DroogError {
     #[msg("Match ID mismatch between accounts")]
     MatchIdMismatch,
     
-    #[msg("Planting is locked during the final 5 minutes of the match")]
+    #[msg("Planting is locked during the final minute of the match")]
     EndgamePlantingLocked,
     
     #[msg("Invalid grow slot index (must be 0-5)")]
@@ -83,4 +83,30 @@ pub enum DroogError {
     
     #[msg("Player A must have a lower pubkey than Player B for deterministic PDA derivation")]
     InvalidPlayerOrder,
+    
+    // ========== Staking Errors (Option C) ==========
+    
+    #[msg("Insufficient token balance for staking")]
+    InsufficientStakeBalance,
+    
+    #[msg("Match is not in Pending status")]
+    MatchNotPending,
+    
+    #[msg("Match is not in Active status")]
+    MatchNotActive,
+    
+    #[msg("Cancel timeout has not elapsed (must wait 5 minutes)")]
+    CancelTooEarly,
+    
+    #[msg("Cannot cancel - Player B has already joined")]
+    PlayerBAlreadyJoined,
+    
+    #[msg("Stake amount exceeds maximum (1 token)")]
+    StakeExceedsMaximum,
+    
+    #[msg("Player has already staked")]
+    AlreadyStaked,
+    
+    #[msg("Arithmetic overflow in calculation")]
+    CalculationOverflow,
 }

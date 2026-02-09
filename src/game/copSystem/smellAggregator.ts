@@ -9,7 +9,7 @@ import { SMELL_RATES, type GrowSlot, type GrowState } from '../solanaClient'
  * Cops never mutate on-chain state.
  */
 export const SMELL_TIERS = {
-  TIER_0: { max: 50, cops: 4, composition: { pinky: 2, inky: 2, blinky: 0, clyde: 0 } },
+  TIER_0: { max: 50, cops: 4, composition: { pinky: 1, inky: 1, blinky: 1, clyde: 1 } },
   TIER_1: { max: 100, cops: 6, composition: { pinky: 2, inky: 2, blinky: 1, clyde: 1 } },
   TIER_2: { max: Infinity, cops: 8, composition: { pinky: 2, inky: 2, blinky: 2, clyde: 2 } },
 } as const

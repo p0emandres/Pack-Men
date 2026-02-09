@@ -6,58 +6,59 @@ export interface Strain {
   regrowthLockout: number // in seconds
 }
 
+// Growth times matched to on-chain GROWTH_TIMES for fast-paced 10-minute matches
 export const STRAINS: Record<number, Strain> = {
-  // Level 1 strains
+  // Level 1 strains - 10 seconds growth
   0: {
     name: 'Blackberry Kush',
     id: 0,
     level: 1,
-    growthTime: 240, // 4 minutes
-    regrowthLockout: 60, // 1 minute
+    growthTime: 10, // 10 seconds (matches on-chain GROWTH_TIMES[1])
+    regrowthLockout: 5, // 5 seconds
   },
   1: {
     name: 'White Widow',
     id: 1,
     level: 1,
-    growthTime: 240,
-    regrowthLockout: 60,
+    growthTime: 10,
+    regrowthLockout: 5,
   },
   2: {
     name: 'Green Crack',
     id: 2,
     level: 1,
-    growthTime: 240,
-    regrowthLockout: 60,
+    growthTime: 10,
+    regrowthLockout: 5,
   },
-  // Level 2 strains
+  // Level 2 strains - 30 seconds growth
   3: {
     name: 'Blackberry Widow',
     id: 3,
     level: 2,
-    growthTime: 420, // 7 minutes
-    regrowthLockout: 90, // 1.5 minutes
+    growthTime: 30, // 30 seconds (matches on-chain GROWTH_TIMES[2])
+    regrowthLockout: 10, // 10 seconds
   },
   4: {
     name: 'White Crack',
     id: 4,
     level: 2,
-    growthTime: 420,
-    regrowthLockout: 90,
+    growthTime: 30,
+    regrowthLockout: 10,
   },
   5: {
     name: 'Green Kush',
     id: 5,
     level: 2,
-    growthTime: 420,
-    regrowthLockout: 90,
+    growthTime: 30,
+    regrowthLockout: 10,
   },
-  // Level 3 strain
+  // Level 3 strain - 60 seconds growth
   6: {
     name: 'Green Widow Kush',
     id: 6,
     level: 3,
-    growthTime: 660, // 11 minutes
-    regrowthLockout: 120, // 2 minutes
+    growthTime: 60, // 1 minute (matches on-chain GROWTH_TIMES[3])
+    regrowthLockout: 15, // 15 seconds
   },
 }
 

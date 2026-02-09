@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
 /// Delivery slot rotation interval in seconds
+/// Updated for fast-paced 10-minute matches
 pub const DELIVERY_ROTATION_INTERVAL: i64 = 60;
 
 /// Maximum number of active delivery spots at any time
@@ -59,6 +60,22 @@ impl MatchDeliveryState {
     pub fn is_customer_available(&self, customer_index: u8) -> bool {
         for i in 0..self.active_count as usize {
             if i < MAX_DELIVERY_SPOTS && self.available_customers[i] == customer_index {
+                return true;
+            }
+        }
+        false
+    }
+    
+    /// Remove a customer from availability after a successful delivery.
+    /// This ensures each customer can only be delivered to ONCE per rotation cycle.
+    /// Creates competition between players for available spots.
+    /// 
+    /// Returns true if customer was found and removed, false otherwise.
+    pub fn remove_customer(&mut self, customer_index: u8) -> bool {
+        for i in 0..self.active_count as usize {
+            if i < MAX_DELIVERY_SPOTS && self.available_customers[i] == customer_index {
+                // Replace with INVALID_INDEX to mark as unavailable
+                self.available_customers[i] = Self::INVALID_INDEX;
                 return true;
             }
         }

@@ -18,7 +18,7 @@ pub fn sell_to_customer(
     let current_ts = clock.unix_timestamp;
     let match_state = &mut ctx.accounts.match_state;
     let grow_state = &mut ctx.accounts.grow_state;
-    let delivery_state = &ctx.accounts.delivery_state;
+    let delivery_state = &mut ctx.accounts.delivery_state;
     let player = ctx.accounts.player.key();
     
     // Prevent state changes after finalization
@@ -130,6 +130,12 @@ pub fn sell_to_customer(
     // Get delivery rotation bucket for event
     let rotation_bucket = MatchDeliveryState::get_rotation_bucket(current_ts);
     
+    // ========== REMOVE CUSTOMER FROM AVAILABILITY ==========
+    // Each customer can only be delivered to ONCE per rotation cycle.
+    // This creates competition between players for available delivery spots.
+    // The customer will become available again on the next rotation refresh.
+    delivery_state.remove_customer(customer_index);
+    
     // Emit enhanced sale event for auditability
     emit!(SaleEvent {
         match_id,
@@ -174,10 +180,13 @@ pub struct SellToCustomer<'info> {
     )]
     pub grow_state: Box<Account<'info, MatchGrowState>>,
     
-    /// The delivery state PDA (for availability validation)
+    /// The delivery state PDA (for availability validation and removal after sale)
     /// AUTHORITY: Solana determines which customers are available for delivery.
     /// Client CANNOT influence this - only render indicators based on this state.
+    /// NOTE: Mutable because we remove the customer from availability after sale.
+    /// Each customer can only be delivered to ONCE per rotation cycle.
     #[account(
+        mut,
         seeds = [b"delivery", match_state.match_id.to_le_bytes().as_ref()],
         bump = delivery_state.bump,
         constraint = delivery_state.match_id == match_state.match_id @ DroogError::MatchIdMismatch

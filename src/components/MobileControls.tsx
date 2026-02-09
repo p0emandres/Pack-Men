@@ -1,236 +1,210 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
-// Styles for mobile controls
+/**
+ * Ultra-minimal dark mobile controls
+ * Classic console-style layout: joystick left, action buttons right
+ * Subtle outlines at rest, brightening on touch
+ */
 const styles = `
   /* Mobile Controls Container */
-  .mobile-controls-container {
+  .mc-container {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
     pointer-events: none;
     z-index: 1000;
-    padding: 24px;
-    padding-bottom: max(24px, env(safe-area-inset-bottom));
+    padding: 20px;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
   }
 
-  /* Hide controls when on login/menu screen */
-  .mobile-controls-container.hidden {
-    display: none;
+  /* Hide on desktop */
+  @media (min-width: 769px) and (hover: hover) and (pointer: fine) {
+    .mc-container {
+      display: none;
+    }
   }
 
-  /* Virtual Joystick */
-  .joystick-container {
+  /* ==================== JOYSTICK ==================== */
+  .mc-joystick {
     position: relative;
-    width: 140px;
-    height: 140px;
+    width: 120px;
+    height: 120px;
     pointer-events: auto;
     touch-action: none;
   }
 
-  .joystick-base {
+  .mc-joystick-base {
     position: absolute;
-    width: 140px;
-    height: 140px;
+    width: 120px;
+    height: 120px;
     border-radius: 50%;
-    background: radial-gradient(circle at 30% 30%, rgba(40, 40, 60, 0.95), rgba(15, 15, 25, 0.95));
-    border: 3px solid rgba(80, 220, 120, 0.4);
-    box-shadow: 
-      0 4px 20px rgba(0, 0, 0, 0.5),
-      inset 0 0 30px rgba(80, 220, 120, 0.1),
-      0 0 15px rgba(80, 220, 120, 0.2);
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    transition: border-color 0.15s ease;
   }
 
-  .joystick-base::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 80%;
-    height: 80%;
-    transform: translate(-50%, -50%);
-    border-radius: 50%;
-    border: 1px dashed rgba(80, 220, 120, 0.2);
+  .mc-joystick.active .mc-joystick-base {
+    border-color: rgba(255, 255, 255, 0.25);
   }
 
-  .joystick-thumb {
+  .mc-joystick-thumb {
     position: absolute;
-    width: 60px;
-    height: 60px;
+    width: 50px;
+    height: 50px;
     border-radius: 50%;
-    background: radial-gradient(circle at 40% 40%, rgba(100, 255, 150, 0.9), rgba(50, 200, 100, 0.9));
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    box-shadow: 
-      0 2px 15px rgba(80, 220, 120, 0.6),
-      inset 0 -2px 5px rgba(0, 0, 0, 0.2),
-      inset 0 2px 5px rgba(255, 255, 255, 0.2);
-    transition: transform 0.05s ease-out;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
+    transition: background 0.1s ease, border-color 0.1s ease;
   }
 
-  .joystick-thumb.active {
-    background: radial-gradient(circle at 40% 40%, rgba(130, 255, 180, 1), rgba(80, 230, 130, 1));
-    box-shadow: 
-      0 2px 25px rgba(80, 220, 120, 0.8),
-      inset 0 -2px 5px rgba(0, 0, 0, 0.2),
-      inset 0 2px 5px rgba(255, 255, 255, 0.3);
+  .mc-joystick.active .mc-joystick-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
   }
 
-  /* Action FAB */
-  .action-fab-container {
+  /* ==================== RIGHT SIDE BUTTONS ==================== */
+  .mc-buttons {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
     pointer-events: auto;
   }
 
-  .action-fab {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    border: none;
-    cursor: pointer;
+  /* Base button style */
+  .mc-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Space Mono', 'SF Mono', 'Consolas', monospace;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 1px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.5);
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
     text-transform: uppercase;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
+    transition: all 0.12s ease;
+    user-select: none;
   }
 
-  .action-fab.enter {
-    background: radial-gradient(circle at 40% 40%, rgba(80, 220, 120, 1), rgba(40, 180, 80, 1));
-    color: #0a0a1a;
-    box-shadow: 
-      0 4px 25px rgba(80, 220, 120, 0.6),
-      0 0 40px rgba(80, 220, 120, 0.3),
-      inset 0 -3px 8px rgba(0, 0, 0, 0.2),
-      inset 0 3px 8px rgba(255, 255, 255, 0.2);
+  .mc-btn:active {
+    transform: scale(0.94);
   }
 
-  .action-fab.exit {
-    background: radial-gradient(circle at 40% 40%, rgba(255, 150, 80, 1), rgba(220, 100, 40, 1));
-    color: #0a0a1a;
-    box-shadow: 
-      0 4px 25px rgba(255, 150, 80, 0.6),
-      0 0 40px rgba(255, 150, 80, 0.3),
-      inset 0 -3px 8px rgba(0, 0, 0, 0.2),
-      inset 0 3px 8px rgba(255, 255, 255, 0.2);
+  /* ==================== SPRINT BUTTON ==================== */
+  .mc-sprint {
+    width: 56px;
+    height: 56px;
   }
 
-  .action-fab:active {
-    transform: scale(0.92);
+  .mc-sprint.active {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.9);
   }
 
-  .action-fab.enter:active {
-    box-shadow: 
-      0 2px 15px rgba(80, 220, 120, 0.8),
-      0 0 50px rgba(80, 220, 120, 0.4);
+  .mc-sprint-icon {
+    font-size: 18px;
   }
 
-  .action-fab.exit:active {
-    box-shadow: 
-      0 2px 15px rgba(255, 150, 80, 0.8),
-      0 0 50px rgba(255, 150, 80, 0.4);
-  }
-
-  /* FAB Icon */
-  .action-fab-icon {
-    display: flex;
+  /* ==================== INTERACT BUTTON ==================== */
+  .mc-interact {
+    width: 72px;
+    height: 72px;
     flex-direction: column;
-    align-items: center;
     gap: 2px;
-  }
-
-  .action-fab-arrow {
-    font-size: 22px;
-    line-height: 1;
-  }
-
-  .action-fab-label {
-    font-size: 11px;
-  }
-
-  /* Pulse animation for FAB */
-  @keyframes fabPulse {
-    0%, 100% {
-      transform: scale(1);
-    }
-    50% {
-      transform: scale(1.05);
-    }
-  }
-
-  .action-fab.visible {
-    animation: fabPulse 2s ease-in-out infinite;
-  }
-
-  .action-fab.visible:active {
-    animation: none;
-  }
-
-  /* Fade transition */
-  .action-fab-wrapper {
     opacity: 0;
-    transform: scale(0.8);
-    transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+    transform: scale(0.85);
     pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease, background 0.12s ease, border-color 0.12s ease;
   }
 
-  .action-fab-wrapper.visible {
+  .mc-interact.visible {
     opacity: 1;
     transform: scale(1);
     pointer-events: auto;
   }
 
-  /* Run button */
-  .run-button {
-    position: absolute;
-    right: 0;
-    bottom: 100px;
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    border: 2px solid rgba(80, 180, 220, 0.4);
-    background: radial-gradient(circle at 30% 30%, rgba(40, 40, 60, 0.95), rgba(15, 15, 25, 0.95));
-    color: rgba(80, 180, 220, 0.9);
-    font-family: 'Space Mono', 'SF Mono', 'Consolas', monospace;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-    transition: all 0.15s ease-out;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-    pointer-events: auto;
+  .mc-interact.enter {
+    border-color: rgba(100, 255, 150, 0.25);
+    color: rgba(100, 255, 150, 0.7);
   }
 
-  .run-button.active {
-    background: radial-gradient(circle at 40% 40%, rgba(80, 200, 240, 0.9), rgba(40, 160, 200, 0.9));
-    color: #0a0a1a;
-    border-color: rgba(120, 220, 255, 0.6);
-    box-shadow: 
-      0 2px 20px rgba(80, 180, 220, 0.6),
-      0 0 30px rgba(80, 180, 220, 0.3);
+  .mc-interact.enter:active {
+    background: rgba(100, 255, 150, 0.15);
+    border-color: rgba(100, 255, 150, 0.5);
+    color: rgba(100, 255, 150, 1);
   }
 
-  /* Hide on desktop */
-  @media (min-width: 769px) and (hover: hover) and (pointer: fine) {
-    .mobile-controls-container {
-      display: none;
-    }
+  .mc-interact.exit {
+    border-color: rgba(255, 180, 100, 0.25);
+    color: rgba(255, 180, 100, 0.7);
+  }
+
+  .mc-interact.exit:active {
+    background: rgba(255, 180, 100, 0.15);
+    border-color: rgba(255, 180, 100, 0.5);
+    color: rgba(255, 180, 100, 1);
+  }
+
+  .mc-interact.sell {
+    border-color: rgba(100, 200, 255, 0.25);
+    color: rgba(100, 200, 255, 0.7);
+  }
+
+  .mc-interact.sell:active {
+    background: rgba(100, 200, 255, 0.15);
+    border-color: rgba(100, 200, 255, 0.5);
+    color: rgba(100, 200, 255, 1);
+  }
+
+  .mc-interact.plant {
+    border-color: rgba(180, 100, 255, 0.25);
+    color: rgba(180, 100, 255, 0.7);
+  }
+
+  .mc-interact.plant:active {
+    background: rgba(180, 100, 255, 0.15);
+    border-color: rgba(180, 100, 255, 0.5);
+    color: rgba(180, 100, 255, 1);
+  }
+
+  .mc-interact-icon {
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .mc-interact-label {
+    font-size: 9px;
+    letter-spacing: 0.3px;
+  }
+
+  /* ==================== INVENTORY BUTTON ==================== */
+  .mc-inventory {
+    width: 48px;
+    height: 48px;
+  }
+
+  .mc-inventory:active {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .mc-inventory-icon {
+    font-size: 18px;
   }
 `;
 
@@ -241,9 +215,14 @@ interface JoystickState {
   y: number; // -1 to 1
 }
 
-interface ProximityState {
-  type: 'enter' | 'exit' | null;
-  roomId: number | null;
+// Interaction context types - what the player can interact with
+export type InteractionType = 'enter' | 'exit' | 'sell' | 'plant' | null;
+
+export interface InteractionState {
+  type: InteractionType;
+  roomId?: number | null;
+  customerIndex?: number | null;
+  slotIndex?: number | null;
 }
 
 // Event types for communicating with scene.ts
@@ -251,12 +230,13 @@ export interface MobileControlEvents {
   onJoystickMove: (x: number, y: number) => void;
   onJoystickEnd: () => void;
   onRunStateChange: (isRunning: boolean) => void;
-  onActionPress: () => void;
+  onInteractPress: () => void;
+  onInventoryPress: () => void;
 }
 
 // Singleton to store event handlers (set by scene.ts)
 let mobileControlEvents: MobileControlEvents | null = null;
-let proximityCallback: (() => ProximityState) | null = null;
+let interactionCallback: (() => InteractionState) | null = null;
 let gameActiveCallback: (() => boolean) | null = null;
 
 // Export functions for scene.ts to register handlers
@@ -264,8 +244,8 @@ export function registerMobileControlEvents(events: MobileControlEvents): void {
   mobileControlEvents = events;
 }
 
-export function registerProximityCallback(callback: () => ProximityState): void {
-  proximityCallback = callback;
+export function registerInteractionCallback(callback: () => InteractionState): void {
+  interactionCallback = callback;
 }
 
 export function registerGameActiveCallback(callback: () => boolean): void {
@@ -290,21 +270,42 @@ export function isMobileDevice(): boolean {
   return (hasTouchScreen && isCoarsePointer) || isMobileWidth;
 }
 
+// Get display info for interaction type
+function getInteractionInfo(type: InteractionType): { icon: string; label: string } {
+  switch (type) {
+    case 'enter':
+      return { icon: '↓', label: 'ENTER' };
+    case 'exit':
+      return { icon: '↑', label: 'EXIT' };
+    case 'sell':
+      return { icon: '$', label: 'SELL' };
+    case 'plant':
+      return { icon: '🌱', label: 'PLANT' };
+    default:
+      return { icon: '', label: '' };
+  }
+}
+
+interface MobileControlsProps {
+  onInventoryToggle?: () => void;
+}
+
 /**
  * MobileControls component
- * Renders a virtual joystick for movement and a contextual FAB for enter/exit actions
+ * Ultra-minimal dark aesthetic with classic console-style layout
+ * Left: Virtual joystick for movement
+ * Right: Sprint, Interact (contextual), Inventory buttons
  */
-export function MobileControls(): React.ReactElement | null {
+export function MobileControls({ onInventoryToggle }: MobileControlsProps): React.ReactElement | null {
   const [isMobile, setIsMobile] = useState(false);
   const [isGameActive, setIsGameActive] = useState(false);
   const [joystick, setJoystick] = useState<JoystickState>({ active: false, x: 0, y: 0 });
-  const [isRunning, setIsRunning] = useState(false);
-  const [proximity, setProximity] = useState<ProximityState>({ type: null, roomId: null });
+  const [isSprinting, setIsSprinting] = useState(false);
+  const [interaction, setInteraction] = useState<InteractionState>({ type: null });
   
   const joystickRef = useRef<HTMLDivElement>(null);
-  const thumbRef = useRef<HTMLDivElement>(null);
   const joystickCenterRef = useRef({ x: 0, y: 0 });
-  const maxRadius = 40; // Max distance thumb can move from center
+  const maxRadius = 35; // Max distance thumb can move from center
 
   // Check mobile on mount and window resize
   useEffect(() => {
@@ -320,7 +321,7 @@ export function MobileControls(): React.ReactElement | null {
     };
   }, []);
 
-  // Poll proximity state and game active state (when available)
+  // Poll interaction state and game active state (when available)
   useEffect(() => {
     if (!isMobile) return;
     
@@ -331,12 +332,15 @@ export function MobileControls(): React.ReactElement | null {
         setIsGameActive(active);
       }
       
-      // Check proximity
-      if (proximityCallback) {
-        const newProximity = proximityCallback();
-        setProximity(prev => {
-          if (prev.type !== newProximity.type || prev.roomId !== newProximity.roomId) {
-            return newProximity;
+      // Check interaction context
+      if (interactionCallback) {
+        const newInteraction = interactionCallback();
+        setInteraction(prev => {
+          if (prev.type !== newInteraction.type || 
+              prev.roomId !== newInteraction.roomId ||
+              prev.customerIndex !== newInteraction.customerIndex ||
+              prev.slotIndex !== newInteraction.slotIndex) {
+            return newInteraction;
           }
           return prev;
         });
@@ -373,8 +377,8 @@ export function MobileControls(): React.ReactElement | null {
     const clampedDistance = Math.min(distance, maxRadius);
     
     const angle = Math.atan2(deltaY, deltaX);
-    const normalizedX = (Math.cos(angle) * clampedDistance) / maxRadius;
-    const normalizedY = (Math.sin(angle) * clampedDistance) / maxRadius;
+    const normalizedX = distance > 0 ? (Math.cos(angle) * clampedDistance) / maxRadius : 0;
+    const normalizedY = distance > 0 ? (Math.sin(angle) * clampedDistance) / maxRadius : 0;
     
     setJoystick({ active: true, x: normalizedX, y: normalizedY });
     
@@ -396,8 +400,8 @@ export function MobileControls(): React.ReactElement | null {
     const clampedDistance = Math.min(distance, maxRadius);
     
     const angle = Math.atan2(deltaY, deltaX);
-    const normalizedX = (Math.cos(angle) * clampedDistance) / maxRadius;
-    const normalizedY = (Math.sin(angle) * clampedDistance) / maxRadius;
+    const normalizedX = distance > 0 ? (Math.cos(angle) * clampedDistance) / maxRadius : 0;
+    const normalizedY = distance > 0 ? (Math.sin(angle) * clampedDistance) / maxRadius : 0;
     
     setJoystick(prev => ({ ...prev, x: normalizedX, y: normalizedY }));
     
@@ -416,29 +420,39 @@ export function MobileControls(): React.ReactElement | null {
     }
   }, []);
 
-  // Handle run button
-  const handleRunTouchStart = useCallback((e: React.TouchEvent) => {
+  // Handle sprint button
+  const handleSprintTouchStart = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
-    setIsRunning(true);
+    setIsSprinting(true);
     if (mobileControlEvents) {
       mobileControlEvents.onRunStateChange(true);
     }
   }, []);
 
-  const handleRunTouchEnd = useCallback((e: React.TouchEvent) => {
+  const handleSprintTouchEnd = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
-    setIsRunning(false);
+    setIsSprinting(false);
     if (mobileControlEvents) {
       mobileControlEvents.onRunStateChange(false);
     }
   }, []);
 
-  // Handle action FAB press
-  const handleActionPress = useCallback(() => {
+  // Handle interact button press
+  const handleInteractPress = useCallback(() => {
     if (mobileControlEvents) {
-      mobileControlEvents.onActionPress();
+      mobileControlEvents.onInteractPress();
     }
   }, []);
+
+  // Handle inventory button press
+  const handleInventoryPress = useCallback(() => {
+    if (onInventoryToggle) {
+      onInventoryToggle();
+    }
+    if (mobileControlEvents) {
+      mobileControlEvents.onInventoryPress();
+    }
+  }, [onInventoryToggle]);
 
   // Calculate thumb position for rendering
   const thumbStyle = useMemo(() => {
@@ -449,6 +463,9 @@ export function MobileControls(): React.ReactElement | null {
     };
   }, [joystick.x, joystick.y]);
 
+  // Get interaction display info
+  const interactionInfo = useMemo(() => getInteractionInfo(interaction.type), [interaction.type]);
+
   // Don't render on desktop or when game is not active
   if (!isMobile || !isGameActive) {
     return null;
@@ -457,53 +474,52 @@ export function MobileControls(): React.ReactElement | null {
   return (
     <>
       <style>{styles}</style>
-      <div className="mobile-controls-container">
+      <div className="mc-container">
         {/* Joystick - Left side */}
         <div
           ref={joystickRef}
-          className="joystick-container"
+          className={`mc-joystick ${joystick.active ? 'active' : ''}`}
           onTouchStart={handleJoystickTouchStart}
           onTouchMove={handleJoystickTouchMove}
           onTouchEnd={handleJoystickTouchEnd}
           onTouchCancel={handleJoystickTouchEnd}
         >
-          <div className="joystick-base" />
+          <div className="mc-joystick-base" />
           <div 
-            ref={thumbRef}
-            className={`joystick-thumb ${joystick.active ? 'active' : ''}`}
+            className="mc-joystick-thumb"
             style={thumbStyle}
           />
         </div>
 
-        {/* Right side controls */}
-        <div className="action-fab-container">
-          {/* Run button */}
+        {/* Right side buttons */}
+        <div className="mc-buttons">
+          {/* Inventory button - always visible */}
           <button
-            className={`run-button ${isRunning ? 'active' : ''}`}
-            onTouchStart={handleRunTouchStart}
-            onTouchEnd={handleRunTouchEnd}
-            onTouchCancel={handleRunTouchEnd}
+            className="mc-btn mc-inventory"
+            onClick={handleInventoryPress}
           >
-            RUN
+            <span className="mc-inventory-icon">📦</span>
           </button>
 
-          {/* Action FAB */}
-          <div className={`action-fab-wrapper ${proximity.type ? 'visible' : ''}`}>
-            <button
-              className={`action-fab ${proximity.type || ''} ${proximity.type ? 'visible' : ''}`}
-              onClick={handleActionPress}
-              disabled={!proximity.type}
-            >
-              <div className="action-fab-icon">
-                <span className="action-fab-arrow">
-                  {proximity.type === 'enter' ? '↓' : '↑'}
-                </span>
-                <span className="action-fab-label">
-                  {proximity.type === 'enter' ? 'ENTER' : 'EXIT'}
-                </span>
-              </div>
-            </button>
-          </div>
+          {/* Sprint button */}
+          <button
+            className={`mc-btn mc-sprint ${isSprinting ? 'active' : ''}`}
+            onTouchStart={handleSprintTouchStart}
+            onTouchEnd={handleSprintTouchEnd}
+            onTouchCancel={handleSprintTouchEnd}
+          >
+            <span className="mc-sprint-icon">⚡</span>
+          </button>
+
+          {/* Interact button - contextual */}
+          <button
+            className={`mc-btn mc-interact ${interaction.type || ''} ${interaction.type ? 'visible' : ''}`}
+            onClick={handleInteractPress}
+            disabled={!interaction.type}
+          >
+            <span className="mc-interact-icon">{interactionInfo.icon}</span>
+            <span className="mc-interact-label">{interactionInfo.label}</span>
+          </button>
         </div>
       </div>
     </>

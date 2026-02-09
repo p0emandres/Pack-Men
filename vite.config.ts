@@ -1,6 +1,18 @@
 import { defineConfig } from 'vite';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
+  plugins: [
+    nodePolyfills({
+      // Enable Buffer polyfill for @solana/spl-token
+      include: ['buffer'],
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+    }),
+  ],
   server: {
     port: 3000,
     open: true,
@@ -41,7 +53,14 @@ export default defineConfig({
       '@solana-program/system',
       '@solana-program/token',
       '@solana/kit',
+      '@solana/spl-token',
     ],
+    esbuildOptions: {
+      // Node.js global to browser globalThis
+      define: {
+        global: 'globalThis',
+      },
+    },
   },
   define: {
     global: 'globalThis',

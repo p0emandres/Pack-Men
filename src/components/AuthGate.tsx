@@ -5,6 +5,7 @@ import type { PlayerIdentity } from '../types/identity'
 import { Dashboard } from './Dashboard'
 import { PlantGrowthDisplayWrapper } from './PlantGrowthDisplayWrapper'
 import { MatchStartModalManager } from './MatchStartModalManager'
+import { JailOverlay } from './JailOverlay'
 
 // CSS for pulsing green animation and pixel font
 const pulseStyle = `
@@ -192,6 +193,8 @@ export function AuthGate() {
           <PlantGrowthDisplayWrapper />
           {/* Render MatchStartModalManager for multiplayer matches */}
           {identity.matchId && <MatchStartModalManager />}
+          {/* Render JailOverlay for cop capture timeout display */}
+          <JailOverlay />
         </>
       )}
     </>

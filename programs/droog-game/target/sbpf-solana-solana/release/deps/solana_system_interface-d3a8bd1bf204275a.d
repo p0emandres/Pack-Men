@@ -1,9 +1,0 @@
-/Users/omaridoucet/Documents/droog1.2/programs/droog-game/target/sbpf-solana-solana/release/deps/libsolana_system_interface-d3a8bd1bf204275a.rmeta: /Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/lib.rs /Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/error.rs /Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/instruction.rs
-
-/Users/omaridoucet/Documents/droog1.2/programs/droog-game/target/sbpf-solana-solana/release/deps/libsolana_system_interface-d3a8bd1bf204275a.rlib: /Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/lib.rs /Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/error.rs /Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/instruction.rs
-
-/Users/omaridoucet/Documents/droog1.2/programs/droog-game/target/sbpf-solana-solana/release/deps/solana_system_interface-d3a8bd1bf204275a.d: /Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/lib.rs /Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/error.rs /Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/instruction.rs
-
-/Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/lib.rs:
-/Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/error.rs:
-/Users/omaridoucet/.cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-system-interface-1.0.0/src/instruction.rs:

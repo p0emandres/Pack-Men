@@ -41,7 +41,7 @@ export const GrowSlotPlantingModal: React.FC<GrowSlotPlantingModalProps> = ({
       <div className="planting-modal-overlay" onClick={onClose}>
         <div className="planting-modal" onClick={(e) => e.stopPropagation()}>
           <h3>Planting Locked</h3>
-          <p>Planting is locked during the final 5 minutes of the match.</p>
+          <p>Planting is locked during the final minute of the match.</p>
           <button className="planting-modal-close" onClick={onClose}>Close</button>
         </div>
       </div>
@@ -63,7 +63,7 @@ export const GrowSlotPlantingModal: React.FC<GrowSlotPlantingModalProps> = ({
             >
               <img src="/hq/bud/lvl1.png" alt="Level 1" className="strain-level-image" />
               <span className="strain-level-name">Level 1</span>
-              <span className="strain-level-time">3 min</span>
+              <span className="strain-level-time">10 sec</span>
               {!canPlantLevel1 && <span className="strain-level-disabled">Too late</span>}
             </button>
             <button
@@ -73,7 +73,7 @@ export const GrowSlotPlantingModal: React.FC<GrowSlotPlantingModalProps> = ({
             >
               <img src="/hq/bud/lvl2.png" alt="Level 2" className="strain-level-image" />
               <span className="strain-level-name">Level 2</span>
-              <span className="strain-level-time">6 min</span>
+              <span className="strain-level-time">30 sec</span>
               {!canPlantLevel2 && <span className="strain-level-disabled">Too late</span>}
             </button>
             <button
@@ -83,7 +83,7 @@ export const GrowSlotPlantingModal: React.FC<GrowSlotPlantingModalProps> = ({
             >
               <img src="/hq/bud/lvl3.png" alt="Level 3" className="strain-level-image" />
               <span className="strain-level-name">Level 3</span>
-              <span className="strain-level-time">10 min</span>
+              <span className="strain-level-time">1 min</span>
               {!canPlantLevel3 && <span className="strain-level-disabled">Too late</span>}
             </button>
           </div>

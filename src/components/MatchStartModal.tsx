@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { usePrivy } from '@privy-io/react-auth'
-import { useWallets, useSignTransaction } from '@privy-io/react-auth/solana'
+import { useWallets, useSignTransaction, useSignAndSendTransaction } from '@privy-io/react-auth/solana'
 import { PublicKey, Connection, Keypair } from '@solana/web3.js'
-import { DroogGameClient, createWalletFromKeypair, createWalletFromPrivyWallet } from '../game/solanaClient'
+import { DroogGameClient, createWalletFromKeypair, createWalletFromPrivyWallet, STAKE_AMOUNT, TOKEN_DECIMALS, CANCEL_TIMEOUT_SECONDS } from '../game/solanaClient'
 import { identityStore } from '../game/identityStore'
 import { 
   shouldSubmitTransaction, 
@@ -175,6 +175,7 @@ export function MatchStartModal({
   const { user } = usePrivy()
   const { wallets: solanaWallets } = useWallets()
   const { signTransaction } = useSignTransaction()
+  const { signAndSendTransaction } = useSignAndSendTransaction()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [status, setStatus] = useState<string>('')
   const [pdaExists, setPdaExists] = useState(false)
@@ -445,6 +446,7 @@ export function MatchStartModal({
       const isPlayerA = localWallet.equals(sortedA)
       if (!isPlayerA) {
         // We're player B - subscribe to PDA account changes via WebSocket
+        // OPTION C: Player B will need to call joinMatchWithStake when match PDA exists
         setStatus('Waiting for player A to start match...')
         hasSubmittedRef.current = true
 
@@ -470,7 +472,7 @@ export function MatchStartModal({
               
               // Parse account data and check for both PDAs
               try {
-                // Create client to parse account
+                // Create client to parse account (read-only)
                 if (!solanaClientRef.current) {
                   const dummyKeypair = Keypair.generate()
                   const dummyWallet = createWalletFromKeypair(dummyKeypair)
@@ -486,6 +488,35 @@ export function MatchStartModal({
 
                 if (!matchState) {
                   return // Match PDA doesn't exist yet
+                }
+
+                // OPTION C STAKING: Player B needs to join and stake
+                // Check stake state to see if we need to call joinMatchWithStake
+                const stakeState = await solanaClientRef.current.getStakeState(matchId)
+                
+                if (stakeState && stakeState.status === 'pending') {
+                  // Match exists but waiting for Player B to stake
+                  console.log('[MatchStartModal] Match PDA exists, Player B needs to join and stake...')
+                  const stakeAmountDisplay = (STAKE_AMOUNT / Math.pow(10, TOKEN_DECIMALS)).toFixed(TOKEN_DECIMALS > 2 ? 2 : TOKEN_DECIMALS)
+                  setStatus(`Staking ${stakeAmountDisplay} $PACKS to join match...`)
+                  
+                  try {
+                    // Player B needs to create a proper wallet for signing
+                    if (!solanaWallets || solanaWallets.length === 0) {
+                      throw new Error('No Solana wallet available for signing')
+                    }
+                    
+                    const signingWallet = await createWalletFromPrivyWallet(solanaWallets[0], signTransaction, undefined, signAndSendTransaction)
+                    const signingClient = await GameClient.create(connectionRef.current!, signingWallet)
+                    
+                    await signingClient.joinMatchWithStake(matchId)
+                    console.log('[MatchStartModal] Player B joined and staked successfully - match is now Active')
+                    setStatus(`✓ ${stakeAmountDisplay} $PACKS staked! Match is now active!`)
+                  } catch (stakeError: any) {
+                    console.error('[MatchStartModal] Failed to join match with stake:', stakeError)
+                    setStatus(`Staking failed: ${stakeError.message || 'Unknown error'}`)
+                    return // Keep subscription active to retry
+                  }
                 }
 
                 // CRITICAL: Check that ALL dependent PDAs exist before dismissing
@@ -673,12 +704,13 @@ export function MatchStartModal({
         throw new Error('No Solana wallet available')
       }
 
-      const wallet = await createWalletFromPrivyWallet(solanaWallets[0], signTransaction)
+      const wallet = await createWalletFromPrivyWallet(solanaWallets[0], signTransaction, undefined, signAndSendTransaction)
       const solanaClient = await GameClient.create(connection, wallet)
       solanaClientRef.current = solanaClient
 
       // Check if we should submit (coordination logic)
       if (!shouldSubmitTransaction(localWallet, sortedA, sortedB)) {
+        // OPTION C: We might be the player who needs to join and stake
         setStatus('Waiting for other player to start match...')
         hasSubmittedRef.current = true
 
@@ -720,6 +752,28 @@ export function MatchStartModal({
 
                 if (!matchState) {
                   return // Match PDA doesn't exist yet
+                }
+
+                // OPTION C STAKING: Check if we need to join and stake
+                const stakeState = await solanaClientRef.current.getStakeState(matchId)
+                
+                if (stakeState && stakeState.status === 'pending') {
+                  // Match exists but waiting for the joining player to stake
+                  console.log('[MatchStartModal] Match PDA exists, joining player needs to stake...')
+                  const stakeAmountDisplay = (STAKE_AMOUNT / Math.pow(10, TOKEN_DECIMALS)).toFixed(TOKEN_DECIMALS > 2 ? 2 : TOKEN_DECIMALS)
+                  setStatus(`Staking ${stakeAmountDisplay} $PACKS to join match...`)
+                  
+                  try {
+                    // Create signing client if not already done
+                    const signingClient = solanaClient // Already has signing capability
+                    await signingClient.joinMatchWithStake(matchId)
+                    console.log('[MatchStartModal] Joined and staked successfully - match is now Active')
+                    setStatus(`✓ ${stakeAmountDisplay} $PACKS staked! Match is now active!`)
+                  } catch (stakeError: any) {
+                    console.error('[MatchStartModal] Failed to join match with stake:', stakeError)
+                    setStatus(`Staking failed: ${stakeError.message || 'Unknown error'}`)
+                    return // Keep subscription active to retry
+                  }
                 }
 
                 // CRITICAL: Check that ALL dependent PDAs exist before dismissing
@@ -773,9 +827,11 @@ export function MatchStartModal({
       // Calculate start timestamp (current time + small buffer)
       const startTs = Math.floor(Date.now() / 1000) + 5 // 5 second buffer
 
-      setStatus('Submitting transaction...')
+      // Calculate stake amount for display
+      const stakeAmountDisplay = (STAKE_AMOUNT / Math.pow(10, TOKEN_DECIMALS)).toFixed(TOKEN_DECIMALS > 2 ? 2 : TOKEN_DECIMALS)
+      setStatus(`Staking ${stakeAmountDisplay} $PACKS to enter match...`)
 
-      // Submit initMatch transaction
+      // Submit initMatch transaction (includes token stake transfer)
       const txSignature = await solanaClient.initMatch(
         matchId,
         startTs,
@@ -783,14 +839,14 @@ export function MatchStartModal({
         sortedB
       )
 
-      setStatus('Transaction submitted! Confirming...')
+      setStatus(`Stake of ${stakeAmountDisplay} $PACKS submitted! Confirming...`)
       hasSubmittedRef.current = true
 
       // Wait for confirmation
       await connection.confirmTransaction(txSignature, 'confirmed')
 
       console.log('[MatchStartModal] Transaction confirmed, fetching match state...')
-      setStatus('Fetching match state...')
+      setStatus(`✓ ${stakeAmountDisplay} $PACKS staked successfully! Fetching match state...`)
 
       // Fetch match state immediately after confirmation
       try {
@@ -825,9 +881,20 @@ export function MatchStartModal({
         })
         console.log('[MatchStartModal] Match timing initialized. StartTs:', startTs, 'EndTs:', endTs)
 
+        // Add delay before dependent PDAs to prevent 429 rate limiting from RPC
+        // This gives the RPC time to cool down after initMatch transaction
+        // Longer delay to allow Privy wallet prep to succeed without 429s
+        setStatus('Preparing grow state...')
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
         // Now proceed with grow state initialization
         setStatus('Initializing grow state...')
         await solanaClient.initGrowState(matchId, sortedA, sortedB)
+
+        // Longer delay between transactions to prevent 429 errors from Privy wallet
+        // Privy's embedded wallet makes RPC calls during transaction preparation
+        setStatus('Preparing delivery state...')
+        await new Promise(resolve => setTimeout(resolve, 2000))
 
         // Initialize delivery state (required for sell_to_customer)
         setStatus('Initializing delivery state...')
@@ -844,8 +911,44 @@ export function MatchStartModal({
         }
       } catch (error: any) {
         console.error('[MatchStartModal] Error initializing match state:', error)
+        const errorMessage = error?.message || String(error)
+        
+        // Check if this is a rate limit (429) error - retry with longer delay
+        if (errorMessage.includes('429') || errorMessage.includes('Too many requests') || errorMessage.includes('rate limit')) {
+          console.log('[MatchStartModal] Rate limited, waiting 3 seconds before retry...')
+          setStatus('Rate limited, retrying in 3 seconds...')
+          try {
+            await new Promise(resolve => setTimeout(resolve, 3000)) // Wait 3 seconds
+            
+            setStatus('Initializing grow state (retry)...')
+            await solanaClient.initGrowState(matchId, sortedA, sortedB)
+            
+            // Longer delay between transactions after rate limit
+            setStatus('Preparing delivery state...')
+            await new Promise(resolve => setTimeout(resolve, 2000))
+            
+            setStatus('Initializing delivery state (retry)...')
+            await solanaClient.initDeliveryState(matchId, sortedA, sortedB)
+            
+            console.log('[MatchStartModal] Dependent PDAs initialized successfully on retry')
+            setStatus('Match started!')
+            setPdaExists(true)
+            if (!hasDismissedRef.current) {
+              hasDismissedRef.current = true
+              onMatchStarted()
+            }
+            return
+          } catch (retryError: any) {
+            console.error('[MatchStartModal] Rate limit retry failed:', retryError)
+            setStatus(`Error: ${retryError.message || 'Rate limit retry failed. Please try again.'}`)
+            setIsSubmitting(false)
+            hasSubmittedRef.current = false
+            return
+          }
+        }
+        
         // Retry once if match state fetch failed
-        if (error.message?.includes('Match PDA not found') || error.message?.includes('missing player')) {
+        if (errorMessage.includes('Match PDA not found') || errorMessage.includes('missing player')) {
           console.log('[MatchStartModal] Retrying match state fetch...')
           setStatus('Retrying match state fetch...')
           try {
@@ -859,7 +962,12 @@ export function MatchStartModal({
               const playerBStr = retryMatchState.playerB.toBase58()
               sessionStorage.setItem('match_playerA', playerAStr)
               sessionStorage.setItem('match_playerB', playerBStr)
+              setStatus('Initializing grow state...')
               await solanaClient.initGrowState(matchId, sortedA, sortedB)
+              // Longer delay between transactions to prevent 429 errors from Privy wallet
+              setStatus('Preparing delivery state...')
+              await new Promise(resolve => setTimeout(resolve, 2000))
+              setStatus('Initializing delivery state...')
               await solanaClient.initDeliveryState(matchId, sortedA, sortedB)
               console.log('[MatchStartModal] Match state and dependent PDAs initialized successfully on retry')
               setStatus('Match started!')
@@ -874,7 +982,7 @@ export function MatchStartModal({
             console.error('[MatchStartModal] Retry also failed:', retryError)
           }
         }
-        setStatus(`Error: ${error.message || 'Failed to initialize match state. Please try again.'}`)
+        setStatus(`Error: ${errorMessage || 'Failed to initialize match state. Please try again.'}`)
         setIsSubmitting(false)
         hasSubmittedRef.current = false
         return // Don't dismiss modal on error

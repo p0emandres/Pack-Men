@@ -3,6 +3,10 @@ dist
 .DS_Store
 *.log
 
+# Rust/Anchor build artifacts
+target/
+**/target/
+
 # Environment variables (CRITICAL: Never commit secrets)
 .env
 .env.local

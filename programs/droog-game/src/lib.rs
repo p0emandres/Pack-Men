@@ -12,6 +12,12 @@ declare_id!("H5zERNABU2sbbPPaCzYdVabNmAzSWm9eX8PJr2fekncB");
 pub mod droog_game {
     use super::*;
 
+    /// Initialize a match with Player A's stake
+    /// 
+    /// Option C Semantics:
+    /// - Player A escrows 100% of stake (NO BURN)
+    /// - Match status = Pending
+    /// - Player A can cancel if Player B never joins
     pub fn init_match(
         ctx: Context<InitMatch>, 
         match_id_hash: [u8; 32],
@@ -19,6 +25,26 @@ pub mod droog_game {
         start_ts: i64
     ) -> Result<()> {
         instructions::init_match(ctx, match_id_hash, match_id, start_ts)
+    }
+
+    /// Player B joins the match and stakes their tokens
+    /// 
+    /// Option C Critical:
+    /// - Player B escrows 100% of stake
+    /// - Burn occurs ONLY here (10% of total)
+    /// - Match becomes Active ATOMICALLY with burn
+    pub fn join_match_with_stake(ctx: Context<JoinMatchWithStake>) -> Result<()> {
+        instructions::join_match_with_stake(ctx)
+    }
+
+    /// Cancel a pending match and refund Player A
+    /// 
+    /// Security requirement (non-optional):
+    /// - Only callable if status == Pending
+    /// - Only callable after CANCEL_TIMEOUT_SECONDS
+    /// - Player A gets 100% refund (no burn in Pending state)
+    pub fn cancel_match(ctx: Context<CancelMatch>) -> Result<()> {
+        instructions::cancel_match(ctx)
     }
 
     /// Initialize the grow state PDA for a match
@@ -71,6 +97,12 @@ pub mod droog_game {
         instructions::sell_to_customer(ctx, customer_index, strain_level)
     }
 
+    /// Finalize a match and distribute stake to winner
+    /// 
+    /// Settlement code - treat as sacred:
+    /// - Requires status == Active
+    /// - Winner determined by sales count (on-chain)
+    /// - Entire escrow balance goes to winner
     pub fn finalize_match(ctx: Context<FinalizeMatch>) -> Result<()> {
         instructions::finalize_match(ctx)
     }

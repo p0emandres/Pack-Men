@@ -1,10 +1,11 @@
 use anchor_lang::prelude::*;
 
 /// Growth times in seconds for each strain level
+/// Fast-paced 10-minute match timing
 pub const GROWTH_TIMES: [i64; 3] = [
-    180,  // Level 1: 3 minutes
-    360,  // Level 2: 6 minutes
-    600,  // Level 3: 10 minutes
+    10,   // Level 1: 10 seconds
+    30,   // Level 2: 30 seconds
+    60,   // Level 3: 1 minute
 ];
 
 /// Smell accumulation rate per minute for each strain level
@@ -17,8 +18,9 @@ pub const SMELL_RATES: [u16; 3] = [
 /// Variant count for deterministic variant selection
 pub const VARIANT_COUNT: u8 = 3;
 
-/// Endgame lock: no planting in final 5 minutes (300 seconds)
-pub const ENDGAME_LOCK_SECONDS: i64 = 300;
+/// Endgame lock: no planting in final 1 minute (60 seconds)
+/// Adjusted for 10-minute matches
+pub const ENDGAME_LOCK_SECONDS: i64 = 60;
 
 /// Number of grow slots per player
 pub const SLOTS_PER_PLAYER: usize = 6;

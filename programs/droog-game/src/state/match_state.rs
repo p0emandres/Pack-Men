@@ -43,11 +43,12 @@ impl MatchState {
         }
     }
     
+    /// Customer cooldowns adjusted for 10-minute matches
     pub fn get_customer_cooldown(layer: u8) -> i64 {
         match layer {
-            1 => 30,   // 30 seconds
-            2 => 45,   // 45 seconds
-            3 => 75,   // 75 seconds
+            1 => 10,   // 10 seconds (outer ring - easy access)
+            2 => 15,   // 15 seconds (middle ring)
+            3 => 20,   // 20 seconds (inner core - high value)
             _ => 0,
         }
     }
@@ -116,15 +117,16 @@ impl MatchState {
     /// Check if a strain is currently active based on rotation schedule
     /// Rotation boundaries are half-open intervals [start, end) to prevent overlap
     /// 
-    /// Level 1: 2 active strains, rotates every 10 minutes
-    /// Level 2: 1 active strain, rotates every 15 minutes  
+    /// Adjusted for 10-minute matches:
+    /// Level 1: 2 active strains, rotates every 2 minutes (120 seconds)
+    /// Level 2: 1 active strain, rotates every 3 minutes (180 seconds)
     /// Level 3: Always active (1 strain)
     pub fn is_strain_active(&self, strain_id: u8, current_ts: i64) -> bool {
         let elapsed = current_ts - self.start_ts;
         
         // Level 1 strains: 0, 1, 2
         if strain_id < 3 {
-            let rotation_period = 10 * 60; // 10 minutes
+            let rotation_period = 2 * 60; // 2 minutes (was 10)
             let rotation_index = (elapsed / rotation_period) as usize;
             
             // Rotation pattern: [0,1] -> [1,2] -> [2,0] -> [0,1] ...
@@ -140,7 +142,7 @@ impl MatchState {
         
         // Level 2 strains: 3, 4, 5
         if strain_id < 6 {
-            let rotation_period = 15 * 60; // 15 minutes
+            let rotation_period = 3 * 60; // 3 minutes (was 15)
             let rotation_index = (elapsed / rotation_period) as usize;
             
             // Rotate through: 3 -> 4 -> 5 -> 3 ...

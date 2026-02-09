@@ -259,14 +259,24 @@ export const PlantGrowthDisplay: React.FC<PlantGrowthDisplayProps> = ({
         const now = Date.now() / 1000
         const newSummary = growSlotTracker.getSummary(now)
         
-        // Debug: log when summary changes significantly
+        // Debug: log when summary changes significantly (only log occupied slots to reduce noise)
         if (import.meta.env.DEV) {
-          console.log('[PlantGrowthDisplay] updateSummary: slots=', newSummary.slots.map(s => ({
-            slotIndex: s.slotIndex,
-            occupied: s.occupied,
-            isReady: s.isReady,
-            isGrowing: s.isGrowing
-          })))
+          const occupiedOrReadySlots = newSummary.slots.filter(s => s.occupied || s.isReady || s.isGrowing)
+          if (occupiedOrReadySlots.length > 0) {
+            console.log('[PlantGrowthDisplay] updateSummary: active slots=', occupiedOrReadySlots.map(s => ({
+              slot: s.slotIndex,
+              occupied: s.occupied,
+              isReady: s.isReady,
+              isGrowing: s.isGrowing,
+              harvested: s.harvested,
+              progress: Math.round(s.growthProgress * 100) + '%'
+            })))
+          }
+          // Log inventory if it has items
+          const inv = newSummary.inventory
+          if (inv.level1 > 0 || inv.level2 > 0 || inv.level3 > 0) {
+            console.log('[PlantGrowthDisplay] inventory: L1=' + inv.level1 + ', L2=' + inv.level2 + ', L3=' + inv.level3)
+          }
         }
         
         setSummary(newSummary)

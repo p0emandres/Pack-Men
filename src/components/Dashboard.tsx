@@ -1,6 +1,10 @@
 import { usePrivy } from '@privy-io/react-auth'
 import { useWallets } from '@privy-io/react-auth/solana'
 import { useState, useEffect, useRef } from 'react'
+import { PublicKey } from '@solana/web3.js'
+import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token'
+import { createSolanaConnection } from '../game/solanaConnection'
+import { PACKS_MINT } from '../game/solanaClient'
 import type { PlayerIdentity } from '../types/identity'
 
 interface PlayerMetrics {
@@ -18,6 +22,17 @@ interface DashboardProps {
 // CSS for dashboard styling
 const dashboardStyle = `
   @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+  
+  /* Override global body overflow for dashboard */
+  body.dashboard-active {
+    overflow: auto !important;
+    overflow-x: hidden !important;
+  }
+  
+  body.dashboard-active #root {
+    height: auto !important;
+    min-height: 100vh;
+  }
   
   @keyframes pulseGreen {
     0%, 100% {
@@ -208,16 +223,34 @@ const dashboardStyle = `
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     padding: 2rem;
     padding-top: 8rem;
+    padding-bottom: 4rem;
     min-height: 100vh;
     box-sizing: border-box;
+  }
+  
+  /* Spacer to push content toward center when there's room */
+  .dashboard-container::before {
+    content: '';
+    flex: 1 1 auto;
+    max-height: 15vh;
+  }
+  
+  .dashboard-container::after {
+    content: '';
+    flex: 1 1 auto;
   }
   
   @media (max-width: 768px) {
     .dashboard-container {
       padding-top: 10rem;
+      padding-bottom: 6rem;
+    }
+    
+    .dashboard-container::before {
+      max-height: 5vh;
     }
   }
   
@@ -326,6 +359,19 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
   const [isReady, setIsReady] = useState(false)
   const [gameStarted, setGameStarted] = useState(false)
   const pollCleanupRef = useRef<(() => void) | null>(null)
+  
+  // Wallet balance state
+  const [solBalance, setSolBalance] = useState<number | null>(null)
+  
+  // Enable scrolling on body when dashboard is active
+  useEffect(() => {
+    document.body.classList.add('dashboard-active')
+    return () => {
+      document.body.classList.remove('dashboard-active')
+    }
+  }, [])
+  const [packsBalance, setPacksBalance] = useState<number | null>(null)
+  const [balancesLoading, setBalancesLoading] = useState(true)
 
   // Get wallet address - try user.wallet.address first, then fallback to Solana wallets
   const getWalletAddress = (): string | undefined => {
@@ -473,6 +519,59 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
 
     fetchMetrics()
   }, [user?.id, getAccessToken])
+
+  // Fetch wallet balances (SOL and $PACKS)
+  useEffect(() => {
+    const fetchBalances = async () => {
+      const walletAddress = getWalletAddress()
+      if (!walletAddress) {
+        setBalancesLoading(false)
+        return
+      }
+
+      try {
+        setBalancesLoading(true)
+        const connection = createSolanaConnection('confirmed')
+        const walletPubkey = new PublicKey(walletAddress)
+
+        // Fetch SOL balance
+        const lamports = await connection.getBalance(walletPubkey)
+        setSolBalance(lamports / 1e9) // Convert lamports to SOL
+
+        // Fetch PACKS token balance
+        try {
+          const tokenAccountAddress = await getAssociatedTokenAddress(
+            PACKS_MINT,
+            walletPubkey
+          )
+          const tokenAccount = await getAccount(connection, tokenAccountAddress)
+          // PACKS has 6 decimals
+          setPacksBalance(Number(tokenAccount.amount) / 1e6)
+        } catch (tokenError: any) {
+          // Token account doesn't exist - user has 0 PACKS
+          if (tokenError.name === 'TokenAccountNotFoundError' || 
+              tokenError.message?.includes('could not find account')) {
+            setPacksBalance(0)
+          } else {
+            console.warn('Error fetching PACKS balance:', tokenError)
+            setPacksBalance(null)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching wallet balances:', error)
+        setSolBalance(null)
+        setPacksBalance(null)
+      } finally {
+        setBalancesLoading(false)
+      }
+    }
+
+    fetchBalances()
+    
+    // Refresh balances every 30 seconds
+    const interval = setInterval(fetchBalances, 30000)
+    return () => clearInterval(interval)
+  }, [solanaWallets])
 
   // Helper function to revoke any existing session and verify it's cleared
   const revokeExistingSession = async (accessToken: string, verify: boolean = false): Promise<boolean> => {
@@ -1317,18 +1416,41 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
                 )}
               </span>
             </div>
+            
+            {/* Wallet Balances */}
+            <span className="user-info-separator">|</span>
+            <div className="user-info-item">
+              <span className="user-info-label">◎ SOL:</span>
+              <span className="user-info-value" style={{ 
+                color: solBalance !== null && solBalance < 0.01 ? '#ff6b6b' : '#00ff00'
+              }}>
+                {balancesLoading ? '...' : solBalance !== null ? solBalance.toFixed(4) : '?'}
+              </span>
+            </div>
+            
+            <span className="user-info-separator">|</span>
+            <div className="user-info-item">
+              <span className="user-info-label">🎒 PACKS:</span>
+              <span className="user-info-value" style={{ 
+                color: packsBalance !== null && packsBalance < 1 ? '#ff6b6b' : '#00ff00'
+              }}>
+                {balancesLoading ? '...' : packsBalance !== null ? packsBalance.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '?'}
+              </span>
+            </div>
           </>
         )}
       </div>
       
       <div
         style={{
-          width: '100vw',
+          width: '100%',
           minHeight: '100vh',
           backgroundColor: '#000000',
           color: '#fff',
           fontFamily: 'Arial, sans-serif',
           boxSizing: 'border-box',
+          overflowX: 'hidden',
+          overflowY: 'auto',
         }}
       >
         <div className="dashboard-container">
@@ -1344,7 +1466,10 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
             <div className="dashboard-card" style={{ 
               marginBottom: '2rem',
               maxWidth: '500px',
-              textAlign: 'center'
+              width: '100%',
+              textAlign: 'center',
+              boxSizing: 'border-box',
+              overflow: 'hidden'
             }}>
               <div style={{
                 fontFamily: "'Press Start 2P', monospace",
@@ -1356,20 +1481,26 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
               </div>
               <div style={{
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '1rem',
+                gap: '0.75rem',
                 marginBottom: '1rem'
               }}>
                 <div style={{
                   fontFamily: "'Courier New', monospace",
-                  fontSize: '24px',
+                  fontSize: 'clamp(14px, 4vw, 24px)',
                   color: '#00ff00',
-                  letterSpacing: '4px',
-                  padding: '0.5rem 1rem',
+                  letterSpacing: 'clamp(1px, 1vw, 4px)',
+                  padding: '0.75rem 1rem',
                   background: 'rgba(0, 255, 0, 0.1)',
                   border: '2px solid rgba(0, 255, 0, 0.3)',
-                  borderRadius: '4px'
+                  borderRadius: '4px',
+                  width: '100%',
+                  maxWidth: '100%',
+                  boxSizing: 'border-box',
+                  wordBreak: 'break-all',
+                  textAlign: 'center'
                 }}>
                   {matchCode}
                 </div>
@@ -1396,7 +1527,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
                     background: 'rgba(0, 255, 0, 0.2)',
                     border: '1px solid rgba(0, 255, 0, 0.5)',
                     color: '#00ff00',
-                    padding: '0.5rem 1rem',
+                    padding: '0.5rem 1.5rem',
                     cursor: 'pointer',
                     fontFamily: "'Press Start 2P', monospace",
                     fontSize: '8px',

@@ -132,8 +132,8 @@ function createMockedGrowState(): {
   growState: GrowState
 } {
   const now = Math.floor(Date.now() / 1000)
-  const matchStartTs = now - 300 // Started 5 minutes ago
-  const matchEndTs = now + 1800 // Ends in 30 minutes
+  const matchStartTs = now - 120 // Started 2 minutes ago
+  const matchEndTs = now + 480 // Ends in 8 minutes (10-min match total)
 
   const mocked = new MockedGrowState()
   mocked.initialize()

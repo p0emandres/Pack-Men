@@ -106,11 +106,19 @@ export class CopEntities {
    * Uses existing Swat.gltf as the cop model.
    */
   async initialize(): Promise<void> {
-    if (this.modelLoadPromise) return this.modelLoadPromise
+    console.log('[CopEntities] initialize() called')
+    
+    if (this.modelLoadPromise) {
+      console.log('[CopEntities] Returning existing model load promise')
+      return this.modelLoadPromise
+    }
+    
+    console.log('[CopEntities] Starting model load...')
     
     this.modelLoadPromise = new Promise((resolve, reject) => {
       // Use Swat model as cop (already exists in the project)
       const modelPath = '/buildings/character/Swat.gltf'
+      console.log(`[CopEntities] Loading model from: ${modelPath}`)
       
       this.loader.load(
         modelPath,
@@ -123,10 +131,13 @@ export class CopEntities {
             applyTextureQuality(this.copModel, this.renderer)
           }
           
-          console.log('[CopEntities] Model loaded successfully')
+          console.log('[CopEntities] Model loaded successfully, animations:', this.copAnimations.length)
           resolve()
         },
-        undefined,
+        (progress) => {
+          // Optional progress logging (can be noisy)
+          // console.log('[CopEntities] Loading progress:', Math.round((progress.loaded / progress.total) * 100), '%')
+        },
         (error) => {
           console.error('[CopEntities] Failed to load cop model:', error)
           reject(error)
@@ -155,15 +166,27 @@ export class CopEntities {
    * Spawn cops based on current smell tier.
    */
   async spawnCopsForTier(tier: SmellTier): Promise<void> {
-    if (this.isDestroyed) return
+    console.log(`[CopEntities] spawnCopsForTier called with tier: ${tier}`)
+    
+    if (this.isDestroyed) {
+      console.log('[CopEntities] Cannot spawn - destroyed')
+      return
+    }
     if (!this.copModel) {
+      console.log('[CopEntities] No cop model, initializing...')
       await this.initialize()
     }
-    if (!this.copModel) return
+    if (!this.copModel) {
+      console.error('[CopEntities] Failed to load cop model')
+      return
+    }
     
     this.currentTier = tier
     const tierConfig = SMELL_TIERS[tier]
     const composition = tierConfig.composition
+    
+    console.log(`[CopEntities] Tier ${tier} composition:`, composition)
+    console.log(`[CopEntities] Current spawned composition:`, this.spawnedComposition)
     
     // Determine which cops need to spawn
     const toSpawn: { personality: CopPersonality; index: number }[] = []
@@ -182,6 +205,8 @@ export class CopEntities {
       toSpawn.push({ personality: 'CLYDE', index: i })
     }
     
+    console.log(`[CopEntities] Will spawn ${toSpawn.length} cops:`, toSpawn.map(c => c.personality))
+    
     // Spawn new cops
     for (const { personality, index } of toSpawn) {
       await this.spawnCop(personality, index)
@@ -192,6 +217,8 @@ export class CopEntities {
     if (this.cops.size > 0) {
       copPhaseSystem.markCopsSpawned()
     }
+    
+    console.log(`[CopEntities] Total cops now: ${this.cops.size}`)
   }
 
   /**
@@ -205,8 +232,29 @@ export class CopEntities {
     
     // Clone the model
     const group = SkeletonUtils.clone(this.copModel) as THREE.Group
-    group.position.copy(spawnPoint)
-    group.scale.setScalar(1.0)
+    
+    // Scale cop to match Casual character size
+    // The Casual_Hoodie/Casual_2 models are ~1.7-1.8 units tall at default scale
+    // Swat model needs to be scaled to match this exact height for visual consistency
+    const TARGET_PLAYER_HEIGHT = 1.75  // Match Casual character height
+    const box = new THREE.Box3().setFromObject(group)
+    const size = box.getSize(new THREE.Vector3())
+    const currentHeight = size.y
+    
+    // Scale to match player character height
+    const scale = TARGET_PLAYER_HEIGHT / currentHeight
+    group.scale.set(scale, scale, scale)
+    
+    // Recalculate bounding box after scaling
+    const newBox = new THREE.Box3().setFromObject(group)
+    const center = newBox.getCenter(new THREE.Vector3())
+    
+    // Position at spawn point, centered horizontally, feet at ground level
+    group.position.set(
+      spawnPoint.x - center.x,
+      -newBox.min.y,  // Place feet at ground level
+      spawnPoint.z - center.z
+    )
     
     // Apply personality color
     const color = COP_COLORS[personality]
@@ -481,6 +529,7 @@ export class CopEntities {
       { personality: 'BLINKY', index: 0 },
       { personality: 'PINKY', index: 0 },
       { personality: 'INKY', index: 0 },
+      { personality: 'CLYDE', index: 0 },
     ]
     
     for (const { personality, index } of demoCops) {

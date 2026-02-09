@@ -14,7 +14,238 @@ export type DroogGame = {
   },
   "instructions": [
     {
+      "name": "cancelMatch",
+      "docs": [
+        "Cancel a pending match and refund Player A",
+        "",
+        "Security requirement (non-optional):",
+        "- Only callable if status == Pending",
+        "- Only callable after CANCEL_TIMEOUT_SECONDS",
+        "- Player A gets 100% refund (no burn in Pending state)"
+      ],
+      "discriminator": [
+        142,
+        136,
+        247,
+        45,
+        92,
+        112,
+        180,
+        83
+      ],
+      "accounts": [
+        {
+          "name": "stakeState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_state.match_id_hash",
+                "account": "matchStakeState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "$PACKS token mint"
+          ]
+        },
+        {
+          "name": "playerATokenAccount",
+          "docs": [
+            "Player A's $PACKS token account (receives refund)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "playerA"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "escrowTokenAccount",
+          "docs": [
+            "Escrow token account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_state.match_id_hash",
+                "account": "matchStakeState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrowAuthority",
+          "docs": [
+            "Escrow authority PDA (signs for refund transfer)"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_state.match_id_hash",
+                "account": "matchStakeState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "playerA",
+          "docs": [
+            "Only Player A can cancel"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "tokenProgram"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "finalizeMatch",
+      "docs": [
+        "Finalize a match and distribute stake to winner",
+        "",
+        "Settlement code - treat as sacred:",
+        "- Requires status == Active",
+        "- Winner determined by sales count (on-chain)",
+        "- Entire escrow balance goes to winner"
+      ],
       "discriminator": [
         6,
         103,
@@ -60,8 +291,114 @@ export type DroogGame = {
           }
         },
         {
+          "name": "stakeState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_state.match_id_hash",
+                "account": "matchStakeState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "$PACKS token mint"
+          ]
+        },
+        {
+          "name": "escrowTokenAccount",
+          "docs": [
+            "Escrow token account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_state.match_id_hash",
+                "account": "matchStakeState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrowAuthority",
+          "docs": [
+            "Escrow authority PDA (signs for payout transfer)"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_state.match_id_hash",
+                "account": "matchStakeState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "winnerTokenAccount",
+          "docs": [
+            "Winner's token account (receives payout)",
+            "Constraint: must belong to either player_a or player_b"
+          ],
+          "writable": true
+        },
+        {
           "name": "player",
           "signer": true
+        },
+        {
+          "name": "tokenProgram"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -458,6 +795,14 @@ export type DroogGame = {
     },
     {
       "name": "initMatch",
+      "docs": [
+        "Initialize a match with Player A's stake",
+        "",
+        "Option C Semantics:",
+        "- Player A escrows 100% of stake (NO BURN)",
+        "- Match status = Pending",
+        "- Player A can cancel if Player B never joins"
+      ],
       "discriminator": [
         168,
         73,
@@ -500,6 +845,186 @@ export type DroogGame = {
           }
         },
         {
+          "name": "stakeState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "matchIdHash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "$PACKS token mint"
+          ],
+          "writable": true
+        },
+        {
+          "name": "playerATokenAccount",
+          "docs": [
+            "Player A's $PACKS token account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "playerA"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "escrowTokenAccount",
+          "docs": [
+            "Escrow token account (PDA-controlled)",
+            "Seeds: [\"escrow\", match_id_hash]"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "matchIdHash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrowAuthority",
+          "docs": [
+            "Escrow authority PDA (signs for escrow transfers)",
+            "Seeds: [\"escrow_auth\", match_id_hash]"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "matchIdHash"
+              }
+            ]
+          }
+        },
+        {
           "name": "playerA",
           "writable": true,
           "signer": true
@@ -507,13 +1032,19 @@ export type DroogGame = {
         {
           "name": "playerB",
           "docs": [
-            "Player B's public key (used for PDA derivation and validation)",
-            "Note: Player B does not need to sign - player_a initiates the match",
-            "The constraint ensures player_a.key() < player_b.key() for deterministic ordering"
+            "Player B's public key (used for PDA derivation)"
           ]
         },
         {
-          "name": "systemProgram"
+          "name": "tokenProgram"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -537,6 +1068,227 @@ export type DroogGame = {
           "type": "i64"
         }
       ]
+    },
+    {
+      "name": "joinMatchWithStake",
+      "docs": [
+        "Player B joins the match and stakes their tokens",
+        "",
+        "Option C Critical:",
+        "- Player B escrows 100% of stake",
+        "- Burn occurs ONLY here (10% of total)",
+        "- Match becomes Active ATOMICALLY with burn"
+      ],
+      "discriminator": [
+        114,
+        86,
+        145,
+        67,
+        121,
+        135,
+        167,
+        239
+      ],
+      "accounts": [
+        {
+          "name": "stakeState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_state.match_id_hash",
+                "account": "matchStakeState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "$PACKS token mint"
+          ],
+          "writable": true
+        },
+        {
+          "name": "playerBTokenAccount",
+          "docs": [
+            "Player B's $PACKS token account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "playerB"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "escrowTokenAccount",
+          "docs": [
+            "Escrow token account (already initialized by init_match)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_state.match_id_hash",
+                "account": "matchStakeState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrowAuthority",
+          "docs": [
+            "Escrow authority PDA (signs for escrow burns)"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_state.match_id_hash",
+                "account": "matchStakeState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "playerB",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "tokenProgram"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "plantStrain",
@@ -810,10 +1562,13 @@ export type DroogGame = {
         {
           "name": "deliveryState",
           "docs": [
-            "The delivery state PDA (for availability validation)",
+            "The delivery state PDA (for availability validation and removal after sale)",
             "AUTHORITY: Solana determines which customers are available for delivery.",
-            "Client CANNOT influence this - only render indicators based on this state."
+            "Client CANNOT influence this - only render indicators based on this state.",
+            "NOTE: Mutable because we remove the customer from availability after sale.",
+            "Each customer can only be delivered to ONCE per rotation cycle."
           ],
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -879,6 +1634,19 @@ export type DroogGame = {
         124,
         93,
         232
+      ]
+    },
+    {
+      "name": "matchStakeState",
+      "discriminator": [
+        251,
+        144,
+        20,
+        250,
+        46,
+        153,
+        75,
+        114
       ]
     },
     {
@@ -962,6 +1730,32 @@ export type DroogGame = {
       ]
     },
     {
+      "name": "matchActivatedEvent",
+      "discriminator": [
+        252,
+        4,
+        191,
+        226,
+        52,
+        255,
+        204,
+        126
+      ]
+    },
+    {
+      "name": "matchCancelledEvent",
+      "discriminator": [
+        229,
+        189,
+        48,
+        183,
+        219,
+        47,
+        20,
+        37
+      ]
+    },
+    {
       "name": "matchFinalizedEvent",
       "discriminator": [
         253,
@@ -972,6 +1766,19 @@ export type DroogGame = {
         171,
         248,
         221
+      ]
+    },
+    {
+      "name": "matchStakeInitializedEvent",
+      "discriminator": [
+        201,
+        152,
+        1,
+        192,
+        27,
+        221,
+        0,
+        224
       ]
     },
     {
@@ -998,6 +1805,19 @@ export type DroogGame = {
         49,
         225,
         223
+      ]
+    },
+    {
+      "name": "stakePayoutEvent",
+      "discriminator": [
+        150,
+        45,
+        231,
+        104,
+        225,
+        253,
+        113,
+        58
       ]
     }
   ],
@@ -1080,7 +1900,7 @@ export type DroogGame = {
     {
       "code": 6015,
       "name": "endgamePlantingLocked",
-      "msg": "Planting is locked during the final 5 minutes of the match"
+      "msg": "Planting is locked during the final minute of the match"
     },
     {
       "code": 6016,
@@ -1131,6 +1951,46 @@ export type DroogGame = {
       "code": 6025,
       "name": "invalidPlayerOrder",
       "msg": "Player A must have a lower pubkey than Player B for deterministic PDA derivation"
+    },
+    {
+      "code": 6026,
+      "name": "insufficientStakeBalance",
+      "msg": "Insufficient token balance for staking"
+    },
+    {
+      "code": 6027,
+      "name": "matchNotPending",
+      "msg": "Match is not in Pending status"
+    },
+    {
+      "code": 6028,
+      "name": "matchNotActive",
+      "msg": "Match is not in Active status"
+    },
+    {
+      "code": 6029,
+      "name": "cancelTooEarly",
+      "msg": "Cancel timeout has not elapsed (must wait 5 minutes)"
+    },
+    {
+      "code": 6030,
+      "name": "playerBAlreadyJoined",
+      "msg": "Cannot cancel - Player B has already joined"
+    },
+    {
+      "code": 6031,
+      "name": "stakeExceedsMaximum",
+      "msg": "Stake amount exceeds maximum (1 token)"
+    },
+    {
+      "code": 6032,
+      "name": "alreadyStaked",
+      "msg": "Player has already staked"
+    },
+    {
+      "code": 6033,
+      "name": "calculationOverflow",
+      "msg": "Arithmetic overflow in calculation"
     }
   ],
   "types": [
@@ -1459,6 +2319,72 @@ export type DroogGame = {
       }
     },
     {
+      "name": "matchActivatedEvent",
+      "docs": [
+        "Event emitted when Player B joins and match activates"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "matchId",
+            "type": "u64"
+          },
+          {
+            "name": "playerA",
+            "type": "pubkey"
+          },
+          {
+            "name": "playerB",
+            "type": "pubkey"
+          },
+          {
+            "name": "totalEscrowed",
+            "type": "u64"
+          },
+          {
+            "name": "amountBurned",
+            "type": "u64"
+          },
+          {
+            "name": "finalPot",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "matchCancelledEvent",
+      "docs": [
+        "Event emitted when match is cancelled and Player A is refunded"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "matchId",
+            "type": "u64"
+          },
+          {
+            "name": "playerA",
+            "type": "pubkey"
+          },
+          {
+            "name": "amountRefunded",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "matchDeliveryState",
       "docs": [
         "Match-scoped delivery state PDA",
@@ -1659,6 +2585,140 @@ export type DroogGame = {
       }
     },
     {
+      "name": "matchStakeInitializedEvent",
+      "docs": [
+        "Event emitted when Player A initializes match with stake"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "matchId",
+            "type": "u64"
+          },
+          {
+            "name": "playerA",
+            "type": "pubkey"
+          },
+          {
+            "name": "playerB",
+            "type": "pubkey"
+          },
+          {
+            "name": "amountEscrowed",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "matchStakeState",
+      "docs": [
+        "Match-scoped stake state PDA",
+        "",
+        "Seeds: [\"stake\", match_id_hash]",
+        "",
+        "This account tracks the staking lifecycle for a match.",
+        "The actual token balance is always authoritative - cached values",
+        "(player_a_escrowed, player_b_escrowed) are for accounting only.",
+        "",
+        "Authority Hierarchy Compliance:",
+        "- This state is Solana-authoritative",
+        "- Token transfers are program-controlled via escrow PDA",
+        "- No client can modify this state directly"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "matchId",
+            "docs": [
+              "Unique match identifier (derived from match_id_hash)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "matchIdHash",
+            "docs": [
+              "32-byte hash used for PDA derivation (matches MatchState)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "playerA",
+            "docs": [
+              "Player A's wallet address"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "playerB",
+            "docs": [
+              "Player B's wallet address"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Current status of the match staking lifecycle"
+            ],
+            "type": {
+              "defined": {
+                "name": "matchStatus"
+              }
+            }
+          },
+          {
+            "name": "playerAEscrowed",
+            "docs": [
+              "Amount Player A escrowed (pre-burn, for accounting)",
+              "Note: Actual escrow balance is authoritative, this is informational"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "playerBEscrowed",
+            "docs": [
+              "Amount Player B escrowed (pre-burn, for accounting)",
+              "Note: Actual escrow balance is authoritative, this is informational"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "createdAt",
+            "docs": [
+              "Timestamp when Player A initialized the match (for cancel timeout)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump seed"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "escrowBump",
+            "docs": [
+              "Escrow token account bump (for PDA signing)"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "matchState",
       "type": {
         "kind": "struct",
@@ -1728,6 +2788,34 @@ export type DroogGame = {
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "matchStatus",
+      "docs": [
+        "Match status for staking lifecycle",
+        "",
+        "State transitions:",
+        "- Pending -> Active (when Player B joins and burn occurs)",
+        "- Pending -> Cancelled (when Player A cancels after timeout)",
+        "- Active -> Finalized (when match ends and winner is paid)"
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "pending"
+          },
+          {
+            "name": "active"
+          },
+          {
+            "name": "finalized"
+          },
+          {
+            "name": "cancelled"
           }
         ]
       }
@@ -1903,6 +2991,45 @@ export type DroogGame = {
               "Allows post-match audit to verify customer was legitimately available"
             ],
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "stakePayoutEvent",
+      "docs": [
+        "Event emitted when winner receives payout"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "matchId",
+            "type": "u64"
+          },
+          {
+            "name": "winner",
+            "type": "pubkey"
+          },
+          {
+            "name": "loser",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "winnerSales",
+            "type": "u32"
+          },
+          {
+            "name": "loserSales",
+            "type": "u32"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
           }
         ]
       }

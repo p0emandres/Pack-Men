@@ -7,9 +7,10 @@ import type { CaptureEvent } from '../../scenes/city/CopEntities'
 export type PlayerCaptureState = 'ACTIVE' | 'INCAPACITATED'
 
 /**
- * Timeout duration in milliseconds (25 seconds as per spec).
+ * Timeout duration in milliseconds.
+ * Reduced to 10 seconds for fast-paced 10-minute matches.
  */
-export const CAPTURE_TIMEOUT_MS = 25000
+export const CAPTURE_TIMEOUT_MS = 10000
 
 /**
  * Camera shake parameters for capture effect.
@@ -53,7 +54,7 @@ export interface CaptureStateChange {
  * 
  * On capture:
  * 1. Set playerState = 'INCAPACITATED'
- * 2. Disable movement input for 25 seconds
+ * 2. Disable movement input for 10 seconds (fast-paced 10-min matches)
  * 3. Apply camera shake/disruption (visual only)
  * 4. After timeout: teleport player to their room, reset to ACTIVE
  * 5. NO inventory/reputation/smell changes

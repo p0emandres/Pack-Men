@@ -32,8 +32,10 @@ async function buildServer() {
   })
 
   // Security: Rate limiting to prevent brute force and DoS attacks
+  // Higher limits for development, stricter limits for production
+  const isDevelopment = process.env.NODE_ENV !== 'production'
   await fastify.register(rateLimit, {
-    max: 100, // 100 requests per minute per IP
+    max: isDevelopment ? 500 : 100, // 500 req/min in dev, 100 in prod
     timeWindow: '1 minute',
     // Higher limit for health checks
     allowList: (req) => req.url === '/health' || req.url === '/',
