@@ -367,7 +367,7 @@ export async function matchRoutes(fastify: FastifyInstance) {
             updatedMatch.participantWallets.size === 2 &&
             (!updatedMatch.playerAWallet || !updatedMatch.playerBWallet)
         
-        if (walletsChanged) {
+        if (walletsChanged && updatedMatch.participantWallets) {
           const wallets: string[] = []
           for (const participantId of updatedMatch.participants) {
             const wallet = updatedMatch.participantWallets.get(participantId)
