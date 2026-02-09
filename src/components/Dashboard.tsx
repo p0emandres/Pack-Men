@@ -387,9 +387,17 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
   }
 
   // Clean up any stale sessions when component mounts (user is on dashboard, not in game)
+  // IMPORTANT: Only run if we're NOT in an active match flow (hosting, joining, or game started)
   useEffect(() => {
     const cleanupStaleSession = async () => {
       if (!user?.id) return
+      
+      // Don't cleanup if we're actively in a match flow
+      // This prevents race conditions where the session is revoked during game start
+      if (isHosting || isJoining || matchCode || gameStarted) {
+        console.log('Skipping stale session cleanup - active match flow detected')
+        return
+      }
 
       try {
         const accessToken = await getAccessToken()
@@ -425,7 +433,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
     }
 
     cleanupStaleSession()
-  }, [user?.id, getAccessToken])
+  }, [user?.id, getAccessToken, isHosting, isJoining, matchCode, gameStarted])
 
   // Fetch player metrics on component mount
   useEffect(() => {
