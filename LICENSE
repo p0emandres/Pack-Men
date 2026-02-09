@@ -1,21 +1,78 @@
-MIT License
+# Pack-Men Source Available License
 
-Copyright (c) 2026 Pack-Men
+Copyright (c) 2026 Pack-Men. All Rights Reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+## Terms and Conditions
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+### 1. Definitions
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+- "Software" means the Pack-Men game, including all source code, assets, documentation, and related materials in this repository.
+- "Commercial Use" means any use of the Software intended for or directed toward commercial advantage or monetary compensation.
+- "Licensor" means the copyright holder(s) of Pack-Men.
+
+### 2. Grant of Rights
+
+Subject to the terms of this License, the Licensor grants you a non-exclusive, non-transferable, limited license to:
+
+a) **View and Study**: You may view, read, and study the source code for educational and reference purposes.
+
+b) **Personal Use**: You may run the Software locally for personal, non-commercial purposes.
+
+c) **Contribution**: You may submit contributions (pull requests) to the official repository, which upon acceptance become the property of the Licensor.
+
+### 3. Restrictions
+
+You may NOT:
+
+a) **Commercialize**: Use the Software, or any derivative work, for Commercial Use without explicit written permission from the Licensor.
+
+b) **Compete**: Create, deploy, or operate any competing product or service based on or derived from the Software.
+
+c) **Redistribute**: Distribute, sublicense, sell, or otherwise transfer the Software or any derivative works to third parties.
+
+d) **Remove Attribution**: Remove, alter, or obscure any copyright notices, trademarks, or other proprietary notices from the Software.
+
+e) **Claim Ownership**: Represent that you are the author or owner of the Software or any substantial portion thereof.
+
+### 4. Intellectual Property
+
+All intellectual property rights in and to the Software, including but not limited to:
+- Game mechanics and design
+- Visual assets and artwork
+- Smart contract architecture
+- Brand identity and trademarks
+
+remain the exclusive property of the Licensor. This License does not grant you any rights to use the Licensor's trademarks, trade names, or service marks.
+
+### 5. Contributions
+
+By submitting any contribution to this repository, you:
+a) Represent that you have the right to submit the contribution
+b) Grant the Licensor a perpetual, worldwide, non-exclusive, royalty-free license to use, modify, and incorporate your contribution
+c) Agree that your contribution becomes part of the Software under this License
+
+### 6. Commercial Licensing
+
+For Commercial Use rights, partnership inquiries, or licensing arrangements, contact the Licensor directly.
+
+### 7. Disclaimer of Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+### 8. Limitation of Liability
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### 9. Termination
+
+This License automatically terminates if you violate any of its terms. Upon termination, you must destroy all copies of the Software in your possession.
+
+### 10. Governing Law
+
+This License shall be governed by and construed in accordance with applicable copyright and intellectual property laws.
+
+---
+
+For licensing inquiries: [Contact the Pack-Men team]
+
+SPDX-License-Identifier: LicenseRef-PackMen-Proprietary
