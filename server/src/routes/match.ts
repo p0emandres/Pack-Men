@@ -465,9 +465,11 @@ export async function matchRoutes(fastify: FastifyInstance) {
       // Verify user is in this match
       const match = sessionStore.getMatch(matchId)
       if (!match) {
+        console.log(`[SSE] Match not found: ${matchId} for user ${privyUserId}`)
         reply.code(404).send({ error: 'Match not found' })
         return
       }
+      console.log(`[SSE] Match found: ${matchId}, participants: ${match.participants.join(', ')}`)
 
       if (!match.participants.includes(privyUserId)) {
         reply.code(403).send({ error: 'Not a participant in this match' })

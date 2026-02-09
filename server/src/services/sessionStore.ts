@@ -102,7 +102,10 @@ class SessionStore {
           }
           // If host left and no participants remain, clean up the match
           if (match.participants.length === 0) {
+            console.log(`[SessionStore] Deleting match ${session.matchId} - no participants remain (triggered by revokeSession for ${privyUserId})`)
             this.matches.delete(session.matchId)
+          } else {
+            console.log(`[SessionStore] Removed ${privyUserId} from match ${session.matchId}, ${match.participants.length} participants remain`)
           }
         }
       }
