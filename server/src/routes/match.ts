@@ -361,16 +361,17 @@ export async function matchRoutes(fastify: FastifyInstance) {
         }
 
         // Derive playerAWallet and playerBWallet if both players are ready and we have wallet addresses
-        const walletsChanged = updatedMatch.participants.length === 2 && 
+        const participantWallets = updatedMatch.participantWallets
+        const shouldDeriveWallets = updatedMatch.participants.length === 2 && 
             updatedMatch.readyPlayers.length === 2 &&
-            updatedMatch.participantWallets &&
-            updatedMatch.participantWallets.size === 2 &&
+            participantWallets &&
+            participantWallets.size === 2 &&
             (!updatedMatch.playerAWallet || !updatedMatch.playerBWallet)
         
-        if (walletsChanged && updatedMatch.participantWallets) {
+        if (shouldDeriveWallets && participantWallets) {
           const wallets: string[] = []
           for (const participantId of updatedMatch.participants) {
-            const wallet = updatedMatch.participantWallets.get(participantId)
+            const wallet = participantWallets.get(participantId)
             if (wallet) {
               wallets.push(wallet)
             }
