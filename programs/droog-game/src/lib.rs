@@ -6,7 +6,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("H5zERNABU2sbbPPaCzYdVabNmAzSWm9eX8PJr2fekncB");
+declare_id!("2xzwRYwn1gdVBd5FBrvWV5To6qKR9pn9UfiJnZz8GwC2");
 
 #[program]
 pub mod droog_game {

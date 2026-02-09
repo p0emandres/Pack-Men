@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/droog_game.json`.
  */
 export type DroogGame = {
-  "address": "H5zERNABU2sbbPPaCzYdVabNmAzSWm9eX8PJr2fekncB",
+  "address": "2xzwRYwn1gdVBd5FBrvWV5To6qKR9pn9UfiJnZz8GwC2",
   "metadata": {
     "name": "droogGame",
     "version": "0.1.0",

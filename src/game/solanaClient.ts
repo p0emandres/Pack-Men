@@ -321,7 +321,7 @@ async function normalizeIdl(idl: any): Promise<any> {
 }
 
 // Program ID - matches the deployed program on devnet
-export const PROGRAM_ID = new PublicKey('H5zERNABU2sbbPPaCzYdVabNmAzSWm9eX8PJr2fekncB')
+export const PROGRAM_ID = new PublicKey('2xzwRYwn1gdVBd5FBrvWV5To6qKR9pn9UfiJnZz8GwC2')
 
 // =============================================================================
 // $PACKS Token Staking Constants
