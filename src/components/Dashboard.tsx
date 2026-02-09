@@ -6,6 +6,8 @@ import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token'
 import { createSolanaConnection } from '../game/solanaConnection'
 import { PACKS_MINT } from '../game/solanaClient'
 import type { PlayerIdentity } from '../types/identity'
+import { MatchStartModal } from './MatchStartModal'
+import { identityStore } from '../game/identityStore'
 
 interface PlayerMetrics {
   games_played: number
@@ -359,6 +361,13 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
   const [isReady, setIsReady] = useState(false)
   const [gameStarted, setGameStarted] = useState(false)
   const pollCleanupRef = useRef<(() => void) | null>(null)
+  
+  // State for MatchStartModal - shown BEFORE entering game scene
+  const [showMatchStartModal, setShowMatchStartModal] = useState(false)
+  const [playerAWallet, setPlayerAWallet] = useState<string | null>(null)
+  const [playerBWallet, setPlayerBWallet] = useState<string | null>(null)
+  // Store pending identity to pass to game after Solana init completes
+  const pendingIdentityRef = useRef<PlayerIdentity | null>(null)
   
   // Wallet balance state
   const [solBalance, setSolBalance] = useState<number | null>(null)
@@ -1177,10 +1186,16 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
     setReadyPlayers([])
     setIsReady(false)
     setGameStarted(false)
+    setShowMatchStartModal(false)
+    setPlayerAWallet(null)
+    setPlayerBWallet(null)
+    pendingIdentityRef.current = null
   }
 
   // Start the game with peer ID and match ID
   // Uses stored peerId and peerToken from the initial request
+  // IMPORTANT: This now shows the MatchStartModal FIRST for Solana PDA initialization
+  // The actual game scene entry happens AFTER Solana transactions complete
   const startGame = async (matchId: string, accessToken: string) => {
     // Prevent multiple calls to startGame
     if (gameStarted) {
@@ -1189,8 +1204,8 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
     }
 
     try {
-      console.log('Starting game with matchId:', matchId)
-      const walletAddress = user?.wallet?.address
+      console.log('Starting game flow with matchId:', matchId)
+      const walletAddress = getWalletAddress()
 
       // Use stored peer ID and token from refs (immediate access) or state (fallback)
       const peerId = storedPeerIdRef.current || storedPeerId
@@ -1206,6 +1221,10 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
         throw new Error('Peer ID and token not available')
       }
 
+      if (!walletAddress) {
+        throw new Error('Wallet address not available')
+      }
+
       // Mark game as started to prevent duplicate calls
       setGameStarted(true)
 
@@ -1215,13 +1234,14 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
         pollCleanupRef.current = null
       }
 
-      console.log('Creating player identity with:', {
+      console.log('Preparing Solana initialization with:', {
         privyUserId: user?.id,
         walletAddress,
         peerId,
         matchId,
       })
 
+      // Create and store the pending identity (will be used after Solana init completes)
       const playerIdentity: PlayerIdentity = {
         privyUserId: user?.id || '',
         walletAddress: walletAddress || undefined,
@@ -1230,30 +1250,70 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
         peerToken,
         matchId,
       }
+      pendingIdentityRef.current = playerIdentity
+      
+      // Store identity in global store so MatchStartModal can access it
+      identityStore.setIdentity(playerIdentity)
 
-      console.log('Calling onEnterGame with identity')
-      onEnterGame(playerIdentity)
+      // Fetch wallet addresses for both players from the server
+      const apiBaseUrl = import.meta.env.VITE_API_URL || ''
+      const matchResponse = await fetch(`${apiBaseUrl}/api/match/${matchId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!matchResponse.ok) {
+        throw new Error(`Failed to fetch match data: ${matchResponse.status}`)
+      }
+      
+      const matchData = await matchResponse.json()
+      console.log('Match data for Solana init:', matchData)
+      
+      if (!matchData.playerAWallet || !matchData.playerBWallet) {
+        throw new Error('Player wallet addresses not available from server')
+      }
+
+      // Set wallet addresses for the modal
+      setPlayerAWallet(matchData.playerAWallet)
+      setPlayerBWallet(matchData.playerBWallet)
+      
+      // Show the MatchStartModal for Solana PDA initialization
+      // The modal will handle initMatch, initGrowState, initDeliveryState transactions
+      // After completion, it calls handleMatchStarted which will enter the game
+      console.log('Showing MatchStartModal for Solana initialization...')
+      setShowMatchStartModal(true)
+      
     } catch (error) {
       console.error('Error starting game:', error)
-      // Only reset if game hasn't actually started (onEnterGame wasn't called)
-      // If gameStarted is true, the game is already running, so don't clear state
-      if (!gameStarted) {
-        // Reset game started flag on error so user can retry
-        setGameStarted(false)
-        setIsLoading(false)
-        setIsHosting(false)
-        setIsJoining(false)
-        setMatchCode(null)
-        setMatchStatus(null)
-        setStoredPeerId(null)
-        setStoredPeerToken(null)
-        storedPeerIdRef.current = null
-        storedPeerTokenRef.current = null
-      } else {
-        // Game already started, just log the error but don't clear state
-        console.warn('Error in startGame but game already started, ignoring:', error)
-      }
+      // Reset state on error so user can retry
+      setGameStarted(false)
+      setShowMatchStartModal(false)
+      setPlayerAWallet(null)
+      setPlayerBWallet(null)
+      pendingIdentityRef.current = null
+      setIsLoading(false)
+      setIsHosting(false)
+      setIsJoining(false)
+      alert(error instanceof Error ? error.message : 'Failed to start game. Please try again.')
     }
+  }
+  
+  // Called by MatchStartModal after Solana PDA initialization is complete
+  const handleMatchStarted = () => {
+    console.log('Solana initialization complete, entering game...')
+    setShowMatchStartModal(false)
+    
+    const playerIdentity = pendingIdentityRef.current
+    if (!playerIdentity) {
+      console.error('No pending identity available after Solana init')
+      return
+    }
+    
+    console.log('Calling onEnterGame with identity')
+    onEnterGame(playerIdentity)
   }
 
   const handleDemoMode = () => {
@@ -1346,6 +1406,16 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
   return (
     <>
       <style>{dashboardStyle}</style>
+      
+      {/* MatchStartModal for Solana PDA initialization - shown BEFORE entering game */}
+      {showMatchStartModal && playerAWallet && playerBWallet && (
+        <MatchStartModal
+          onMatchStarted={handleMatchStarted}
+          bothPlayersReady={true}
+          playerAWallet={playerAWallet}
+          playerBWallet={playerBWallet}
+        />
+      )}
       
       {/* Stats Header Bar */}
       <div className="stats-header-bar">
