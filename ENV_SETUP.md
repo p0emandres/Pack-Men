@@ -6,28 +6,54 @@ Create a `.env` file in the project root with:
 
 ```
 VITE_PRIVY_APP_ID=your_privy_app_id_here
-VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
+VITE_API_URL=https://your-server-url.com
 ```
 
 Get your Privy App ID from https://dashboard.privy.io
 
 ### Solana RPC Configuration
 
-**Important:** The public Solana RPC endpoints (`https://api.devnet.solana.com` or `https://api.mainnet-beta.solana.com`) are rate-limited and may block your IP if you make too many requests. For production use, you should configure a private RPC endpoint.
+**Important:** The Helius API key should be kept server-side only to prevent exposure in browser network requests.
 
-#### Option 1: Use a Free Private RPC Provider
+#### Option 1: Server-Side RPC Proxy (Recommended)
+
+The server includes an RPC proxy that keeps your Helius API key hidden. Configure:
+
+**Frontend (.env):**
+```
+VITE_API_URL=https://your-server-url.com
+# Optionally, for custom WebSocket endpoint:
+# VITE_SOLANA_WS_URL=wss://api.devnet.solana.com
+```
+
+**Server (server/.env):**
+```
+# Full Helius RPC URL with API key (never exposed to client)
+HELIUS_RPC_URL=https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY
+```
+
+With this setup:
+- All RPC requests go through `/api/rpc` on your server
+- The Helius API key stays server-side only
+- WebSocket subscriptions use public endpoints (or configured `VITE_SOLANA_WS_URL`)
+
+#### Option 2: Direct RPC (Development Only - Exposes API Key)
+
+For local development without a server, you can use direct RPC:
+
+```
+VITE_SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY
+```
+
+⚠️ **Warning:** This exposes your API key in browser network requests. Only use for local development.
+
+### RPC Provider Options
 
 1. **Helius** (Recommended - Free tier available):
    - Sign up at https://dashboard.helius.dev
    - Create an API key
    - For devnet: `https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY`
    - For mainnet: `https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY`
-   - **Important**: The API key must be in the query string as `?api-key=YOUR_KEY` (not `apiKey` or in headers)
-   - **Troubleshooting**: If you get 403 errors with Helius:
-     - Verify your API key is correct and active in the Helius dashboard
-     - Check that your account hasn't exceeded rate limits
-     - Ensure the URL format is exactly: `https://devnet.helius-rpc.com/?api-key=YOUR_KEY`
-     - Check the browser Network tab to see if the API key is being sent in requests
 
 2. **QuickNode**:
    - Sign up at https://www.quicknode.com
@@ -39,16 +65,12 @@ Get your Privy App ID from https://dashboard.privy.io
    - Create a Solana app
    - Use the provided RPC URL
 
-#### Option 2: Use Public Endpoints (Development Only)
+#### Public Endpoints (Development Only)
 
-For development, you can use the public endpoints, but be aware they may return 403 errors if rate-limited:
+For development without an API key, you can use public endpoints (rate-limited):
 
 ```
-# Devnet (default)
 VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
-
-# Mainnet (if needed)
-VITE_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 ```
 
 #### Troubleshooting 403 Errors
@@ -58,7 +80,7 @@ If you see `SolanaError: HTTP error (403)`, it means:
 - You're using a private RPC endpoint without a valid API key
 - You've exceeded rate limits
 
-**Solution:** Configure a private RPC endpoint with a valid API key in your `.env` file.
+**Solution:** Configure a private RPC endpoint with a valid API key.
 
 ## Backend (server/.env)
 
@@ -70,6 +92,10 @@ PRIVY_APP_ID=your_privy_app_id_here
 
 # Privy Application Secret
 PRIVY_APP_SECRET=your_privy_app_secret_here
+
+# Helius RPC URL with API key (for RPC proxy)
+# This keeps your API key server-side, hidden from browser network requests
+HELIUS_RPC_URL=https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY
 
 # Supabase Configuration
 # Get these from your Supabase project settings: https://app.supabase.com
@@ -86,7 +112,7 @@ PEER_TOKEN_SECRET=your_peer_token_secret_here
 PORT=3001
 
 # Allowed CORS origins (comma-separated)
-ALLOWED_ORIGINS=http://localhost:3000
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 ```
 
 ## Generating Secrets

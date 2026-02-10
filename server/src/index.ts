@@ -9,6 +9,7 @@ import { matchRoutes } from './routes/match.js'
 import { analyticsRoutes } from './routes/analytics.js'
 import { metricsRoutes } from './metrics/metricsRoutes.js'
 import { presenceRoutes } from './routes/presence.js'
+import { rpcRoutes } from './routes/rpc.js'
 
 const isProduction = process.env.NODE_ENV === 'production'
 
@@ -138,6 +139,9 @@ async function buildServer() {
   await fastify.register(presenceRoutes, { prefix: '/api/presence' })
   await fastify.register(analyticsRoutes)
   await fastify.register(metricsRoutes, { prefix: '/metrics' })
+  
+  // RPC Proxy - keeps Helius API key server-side
+  await fastify.register(rpcRoutes, { prefix: '/api/rpc' })
 
   return fastify
 }
