@@ -6,6 +6,7 @@ import { DroogGameClient, createWalletFromKeypair, createWalletFromPrivyWallet }
 import { createSolanaConnection } from '../game/solanaConnection'
 import { createMatchIdentity } from '../game/matchIdentity'
 import { identityStore } from '../game/identityStore'
+import { exitToDashboard } from '../game/exitToDashboard'
 
 interface MatchEndModalManagerProps {
   matchStartTs: number
@@ -156,10 +157,14 @@ export function MatchEndModalManager({
     }
   }, [solanaWallets, signTransaction, signAndSendTransaction, matchIdString, playerA, playerB])
 
-  // Handle modal close
+  // Handle modal close - exit to dashboard since match is over
   const handleClose = useCallback(() => {
     setIsOpen(false)
     setHasDismissed(true)
+    
+    // Trigger exit to dashboard - match is complete, no reason to stay in game
+    console.log('[MatchEndModalManager] Exiting to dashboard after match end')
+    exitToDashboard.exit()
   }, [])
 
   if (!isOpen) {

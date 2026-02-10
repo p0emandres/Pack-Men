@@ -4,6 +4,7 @@ import { Buffer } from 'buffer'
 import { PrivyProvider } from './components/PrivyProvider'
 import { AuthGate } from './components/AuthGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { GameToastProvider } from './components/GameToast'
 
 /**
  * React entry point for the application.
@@ -34,9 +35,11 @@ console.log('Environment check:', {
 createRoot(rootElement).render(
   <StrictMode>
     <ErrorBoundary>
-      <PrivyProvider>
-        <AuthGate />
-      </PrivyProvider>
+      <GameToastProvider>
+        <PrivyProvider>
+          <AuthGate />
+        </PrivyProvider>
+      </GameToastProvider>
     </ErrorBoundary>
   </StrictMode>
 )

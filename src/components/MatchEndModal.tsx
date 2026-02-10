@@ -174,7 +174,7 @@ export function MatchEndModal({
             )}
 
             <button className="close-button" onClick={onClose}>
-              {isFinalized ? 'CLOSE' : 'DISMISS'}
+              EXIT TO DASHBOARD
             </button>
           </div>
         </div>

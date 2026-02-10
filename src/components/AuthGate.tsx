@@ -1,10 +1,11 @@
 import { usePrivy } from '@privy-io/react-auth'
-import { useEffect, useRef, useState } from 'react'
-import { initScene } from '../scene'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { initScene, destroyScene } from '../scene'
 import type { PlayerIdentity } from '../types/identity'
 import { Dashboard } from './Dashboard'
 import { PlantGrowthDisplayWrapper } from './PlantGrowthDisplayWrapper'
 import { JailOverlay } from './JailOverlay'
+import { exitToDashboard } from '../game/exitToDashboard'
 
 // CSS for pulsing green animation and pixel font
 const pulseStyle = `
@@ -75,6 +76,29 @@ export function AuthGate() {
     setIdentity(playerIdentity)
     setIsInitializing(true)
   }
+
+  // Handle exiting game and returning to dashboard
+  const handleExitToDashboard = useCallback(() => {
+    console.log('[AuthGate] Handling exit to dashboard...')
+    
+    // Destroy the scene and clean up resources
+    destroyScene()
+    
+    // Reset local state to show dashboard
+    setIdentity(null)
+    setIsInitializing(false)
+    sceneInitializedRef.current = false
+    
+    console.log('[AuthGate] Returned to dashboard')
+  }, [])
+
+  // Subscribe to exit-to-dashboard events
+  useEffect(() => {
+    const unsubscribe = exitToDashboard.subscribe(handleExitToDashboard)
+    return () => {
+      unsubscribe()
+    }
+  }, [handleExitToDashboard])
 
   // Initialize Three.js scene once identity is ready
   useEffect(() => {

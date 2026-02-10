@@ -19,6 +19,8 @@ import { MatchScoreboard } from './MatchScoreboard'
 import { MatchEndModalManager } from './MatchEndModalManager'
 import { useWallets, useSignTransaction } from '@privy-io/react-auth/solana'
 import { MobileControls } from './MobileControls'
+import { useGameToast } from './GameToast'
+import { getPlantErrorMessage, getHarvestErrorMessage } from '../game/errorMessages'
 
 /**
  * Wrapper component that fetches match state and renders PlantGrowthDisplay
@@ -56,6 +58,9 @@ export function PlantGrowthDisplayWrapper() {
   // Get Privy wallet for transactions
   const { wallets: solanaWallets } = useWallets()
   const { signTransaction } = useSignTransaction()
+  
+  // Game toast for themed notifications
+  const { showError, showWarning } = useGameToast()
 
   // Check if mobile device
   useEffect(() => {
@@ -73,7 +78,7 @@ export function PlantGrowthDisplayWrapper() {
     if (!matchIdString) {
       const errorMsg = 'Match ID not available. Please wait for match to initialize.'
       console.error('[PlantGrowthDisplayWrapper]', errorMsg)
-      alert(errorMsg)
+      showWarning('Hold Up', 'Match not ready. Wait for initialization.')
       return
     }
 
@@ -83,21 +88,21 @@ export function PlantGrowthDisplayWrapper() {
         playerA: playerA?.toBase58(),
         playerB: playerB?.toBase58(),
       })
-      alert(errorMsg)
+      showWarning('Hold Up', 'Player info loading. Wait a moment.')
       return
     }
 
     if (!matchStartTs || !matchEndTs) {
       const errorMsg = 'Match timing not available. Please wait for match to start.'
       console.error('[PlantGrowthDisplayWrapper]', errorMsg)
-      alert(errorMsg)
+      showWarning('Hold Up', 'Match hasn\'t started yet.')
       return
     }
 
     if (!solanaWallets || solanaWallets.length === 0) {
       const errorMsg = 'No Solana wallet available. Please connect your wallet.'
       console.error('[PlantGrowthDisplayWrapper]', errorMsg)
-      alert(errorMsg)
+      showError('Wallet Missing', 'Connect your wallet to continue.')
       return
     }
 
@@ -105,7 +110,7 @@ export function PlantGrowthDisplayWrapper() {
     if (slotIndex < 0 || slotIndex >= 6) {
       const errorMsg = `Invalid slot index: ${slotIndex}. Must be between 0 and 5.`
       console.error('[PlantGrowthDisplayWrapper]', errorMsg)
-      alert(errorMsg)
+      showError('Invalid Slot', 'Select a valid grow slot.')
       return
     }
 
@@ -113,7 +118,7 @@ export function PlantGrowthDisplayWrapper() {
     if (strainLevel < 1 || strainLevel > 3) {
       const errorMsg = `Invalid strain level: ${strainLevel}. Must be 1, 2, or 3.`
       console.error('[PlantGrowthDisplayWrapper]', errorMsg)
-      alert(errorMsg)
+      showError('Invalid Strain', 'Select a valid strain level.')
       return
     }
 
@@ -122,7 +127,7 @@ export function PlantGrowthDisplayWrapper() {
     if (pendingSlotsRef.current.has(pendingKey)) {
       const errorMsg = 'Planting operation already in progress for this slot. Please wait.'
       console.warn('[PlantGrowthDisplayWrapper]', errorMsg)
-      alert(errorMsg)
+      showWarning('In Progress', 'Already planting in this slot. Wait a moment.')
       return
     }
 
@@ -299,27 +304,11 @@ export function PlantGrowthDisplayWrapper() {
       
       // No optimistic update to revert - visual state only changes after on-chain confirmation
       
-      // Provide more helpful error messages
-      let errorMessage = 'Failed to plant strain'
-      if (error.message) {
-        if (error.message.includes('SlotOccupied')) {
-          errorMessage = 'This slot is already occupied. Please select an empty slot.'
-        } else if (error.message.includes('EndgamePlantingLocked')) {
-          errorMessage = 'Planting is locked during the final minute of the match.'
-        } else if (error.message.includes('PlantWontBeReady')) {
-          errorMessage = 'This strain will not be ready before the match ends. Choose a faster-growing strain.'
-        } else if (error.message.includes('MatchNotStarted')) {
-          errorMessage = 'Match has not started yet. Please wait for the match to begin.'
-        } else if (error.message.includes('MatchEnded')) {
-          errorMessage = 'Match has ended. Cannot plant new strains.'
-        } else {
-          errorMessage = `Failed to plant: ${error.message}`
-        }
-      }
-      
-      alert(errorMessage)
+      // Show themed error message
+      const errorInfo = getPlantErrorMessage(error)
+      showError(errorInfo.title, errorInfo.message, errorInfo.suggestion)
     }
-  }, [matchIdString, playerA, playerB, solanaWallets, signTransaction, matchStartTs, matchEndTs])
+  }, [matchIdString, playerA, playerB, solanaWallets, signTransaction, matchStartTs, matchEndTs, showError, showWarning])
 
   // Handle harvest action
   const handleHarvest = useCallback(async (slotIndex: number) => {
@@ -327,7 +316,7 @@ export function PlantGrowthDisplayWrapper() {
     if (!matchIdString) {
       const errorMsg = 'Match ID not available. Please wait for match to initialize.'
       console.error('[PlantGrowthDisplayWrapper]', errorMsg)
-      alert(errorMsg)
+      showWarning('Hold Up', 'Match not ready. Wait for initialization.')
       return
     }
 
@@ -337,14 +326,14 @@ export function PlantGrowthDisplayWrapper() {
         playerA: playerA?.toBase58(),
         playerB: playerB?.toBase58(),
       })
-      alert(errorMsg)
+      showWarning('Hold Up', 'Player info loading. Wait a moment.')
       return
     }
 
     if (!solanaWallets || solanaWallets.length === 0) {
       const errorMsg = 'No Solana wallet available. Please connect your wallet.'
       console.error('[PlantGrowthDisplayWrapper]', errorMsg)
-      alert(errorMsg)
+      showError('Wallet Missing', 'Connect your wallet to continue.')
       return
     }
 
@@ -352,7 +341,7 @@ export function PlantGrowthDisplayWrapper() {
     if (slotIndex < 0 || slotIndex >= 6) {
       const errorMsg = `Invalid slot index: ${slotIndex}. Must be between 0 and 5.`
       console.error('[PlantGrowthDisplayWrapper]', errorMsg)
-      alert(errorMsg)
+      showError('Invalid Slot', 'Select a valid grow slot.')
       return
     }
 
@@ -467,41 +456,29 @@ export function PlantGrowthDisplayWrapper() {
     } catch (error: any) {
       console.error('[PlantGrowthDisplayWrapper] Harvest failed:', error)
       
-      // Provide more helpful error messages
-      let errorMessage = 'Failed to harvest strain'
-      if (error.message) {
-        if (error.message.includes('SlotEmpty') || error.message.includes('AlreadyHarvested')) {
-          errorMessage = 'This plant has already been harvested. The slot is now empty.'
-          // Force a state refresh since the slot is actually empty
-          try {
-            const connection = createSolanaConnection('confirmed')
-            const wallet = await createWalletFromPrivyWallet(solanaWallets[0], signTransaction)
-            const client = await DroogGameClient.create(connection, wallet)
-            const matchIdentity = await createMatchIdentity(matchIdString)
-            const confirmedGrowState = await client.getGrowState(matchIdentity.u64, 'confirmed')
-            if (confirmedGrowState) {
-              console.log('[PlantGrowthDisplayWrapper] Force refreshing state after AlreadyHarvested error')
-              growSlotTracker.updateGrowState(confirmedGrowState)
-            }
-          } catch (refreshError) {
-            console.error('[PlantGrowthDisplayWrapper] Error force refreshing after AlreadyHarvested:', refreshError)
+      // Check if it's an AlreadyHarvested error and force refresh
+      if (error.message?.includes('SlotEmpty') || error.message?.includes('AlreadyHarvested')) {
+        // Force a state refresh since the slot is actually empty
+        try {
+          const connection = createSolanaConnection('confirmed')
+          const wallet = await createWalletFromPrivyWallet(solanaWallets[0], signTransaction)
+          const client = await DroogGameClient.create(connection, wallet)
+          const matchIdentity = await createMatchIdentity(matchIdString)
+          const confirmedGrowState = await client.getGrowState(matchIdentity.u64, 'confirmed')
+          if (confirmedGrowState) {
+            console.log('[PlantGrowthDisplayWrapper] Force refreshing state after AlreadyHarvested error')
+            growSlotTracker.updateGrowState(confirmedGrowState)
           }
-        } else if (error.message.includes('GrowthTimeNotElapsed')) {
-          errorMessage = 'Plant is not ready yet. Please wait for it to finish growing.'
-        } else if (error.message.includes('InventoryFull')) {
-          errorMessage = 'Inventory is full. Sell some items before harvesting.'
-        } else if (error.message.includes('MatchNotStarted')) {
-          errorMessage = 'Match has not started yet. Please wait for the match to begin.'
-        } else if (error.message.includes('MatchEnded')) {
-          errorMessage = 'Match has ended. Cannot harvest plants.'
-        } else {
-          errorMessage = `Failed to harvest: ${error.message}`
+        } catch (refreshError) {
+          console.error('[PlantGrowthDisplayWrapper] Error force refreshing after AlreadyHarvested:', refreshError)
         }
       }
       
-      alert(errorMessage)
+      // Show themed error message
+      const errorInfo = getHarvestErrorMessage(error)
+      showError(errorInfo.title, errorInfo.message, errorInfo.suggestion)
     }
-  }, [matchIdString, playerA, playerB, solanaWallets, signTransaction])
+  }, [matchIdString, playerA, playerB, solanaWallets, signTransaction, showError, showWarning])
 
   // Handle delivery action (sell to customer)
   // NOTE: This is the client-side handler. Solana is the SOLE AUTHORITY.
@@ -665,32 +642,37 @@ export function PlantGrowthDisplayWrapper() {
     } catch (error: any) {
       console.error('[PlantGrowthDisplayWrapper] Delivery failed:', error)
       
-      // Provide more helpful error messages
-      let errorMessage = 'Failed to complete delivery'
-      if (error.message) {
-        if (error.message.includes('CustomerNotAvailableForDelivery')) {
-          errorMessage = 'This customer is not currently available for delivery. Wait for rotation.'
-        } else if (error.message.includes('InvalidStrainLevel')) {
-          errorMessage = 'This strain level is not compatible with this customer.'
-        } else if (error.message.includes('InsufficientInventory')) {
-          errorMessage = 'You do not have this strain in your inventory.'
-        } else if (error.message.includes('CustomerOnCooldown')) {
-          errorMessage = 'This customer was recently served. Wait for cooldown.'
-        } else if (error.message.includes('MatchNotStarted')) {
-          errorMessage = 'Match has not started yet. Please wait for the match to begin.'
-        } else if (error.message.includes('MatchEnded')) {
-          errorMessage = 'Match has ended. Cannot make deliveries.'
-        } else if (error.message.includes('MatchAlreadyFinalized')) {
-          errorMessage = 'Match has been finalized. Cannot make deliveries.'
-        } else {
-          errorMessage = `Failed to deliver: ${error.message}`
-        }
+      // Get themed error message
+      const errorMsg = error?.message || String(error)
+      let title = 'Sale Failed'
+      let message = 'Something went wrong with the delivery.'
+      let suggestion = 'Try again or find another customer.'
+      
+      if (errorMsg.includes('CustomerNotAvailableForDelivery') || errorMsg.includes('NotDeliverySpot')) {
+        title = 'Wrong Location'
+        message = 'This customer isn\'t available for delivery right now.'
+        suggestion = 'Wait for the next rotation.'
+      } else if (errorMsg.includes('InvalidStrainLevel')) {
+        title = 'Wrong Strain'
+        message = 'This customer wants a different level.'
+        suggestion = 'Match the product to their layer.'
+      } else if (errorMsg.includes('InsufficientInventory')) {
+        title = 'Out of Stock'
+        message = 'You don\'t have this product.'
+        suggestion = 'Grow and harvest more first.'
+      } else if (errorMsg.includes('CustomerOnCooldown')) {
+        title = 'Customer Busy'
+        message = 'This customer was just served.'
+        suggestion = 'Find another customer or wait.'
+      } else if (errorMsg.includes('MatchEnded') || errorMsg.includes('MatchAlreadyFinalized')) {
+        title = 'Game Over'
+        message = 'The match has ended.'
       }
       
-      alert(errorMessage)
+      showError(title, message, suggestion)
       throw error // Re-throw so the modal knows it failed
     }
-  }, [matchIdString, playerA, playerB, solanaWallets, signTransaction])
+  }, [matchIdString, playerA, playerB, solanaWallets, signTransaction, showError])
 
   useEffect(() => {
     let roomCheckInterval: NodeJS.Timeout | null = null
@@ -1548,8 +1530,9 @@ export function PlantGrowthDisplayWrapper() {
         onDelivery={handleDelivery}
       />
       
-      {/* Plant growth display - shown only when in grow room */}
-      {isInRoom && !isLoading && matchStartTs && matchEndTs && (
+      {/* Plant growth display - shown only when in grow room on desktop */}
+      {/* On mobile, players access inventory via the inventory button */}
+      {isInRoom && !isLoading && matchStartTs && matchEndTs && !isMobile && (
         <PlantGrowthDisplay
           matchStartTs={matchStartTs}
           matchEndTs={matchEndTs}

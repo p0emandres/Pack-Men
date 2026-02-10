@@ -7,6 +7,8 @@ import { createSolanaConnection } from '../game/solanaConnection'
 import { PACKS_MINT } from '../game/solanaClient'
 import type { PlayerIdentity } from '../types/identity'
 import { MatchStartModal } from './MatchStartModal'
+import { useGameToast } from './GameToast'
+import { SendTokensModal } from './SendTokensModal'
 
 interface PlayerMetrics {
   games_played: number
@@ -368,6 +370,9 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
   // Store pending identity to pass to game after Solana init completes
   const pendingIdentityRef = useRef<PlayerIdentity | null>(null)
   
+  // Game toast for themed notifications
+  const { showError, showWarning, showSuccess } = useGameToast()
+  
   // Wallet balance state
   const [solBalance, setSolBalance] = useState<number | null>(null)
   
@@ -380,6 +385,10 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
   }, [])
   const [packsBalance, setPacksBalance] = useState<number | null>(null)
   const [balancesLoading, setBalancesLoading] = useState(true)
+  
+  // Send tokens modal state
+  const [showSendModal, setShowSendModal] = useState(false)
+  const [sendModalTokenType, setSendModalTokenType] = useState<'SOL' | 'PACKS'>('SOL')
 
   // Get wallet address - try user.wallet.address first, then fallback to Solana wallets
   const getWalletAddress = (): string | undefined => {
@@ -756,7 +765,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
       setIsLoading(false)
       setIsHosting(false)
       cleanupMatchState()
-      alert(error instanceof Error ? error.message : 'Failed to host match')
+      showError('Host Failed', error instanceof Error ? error.message : 'Failed to host match', 'Check your connection and try again.')
     }
   }
 
@@ -769,7 +778,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
     }
 
     if (!joinMatchCode.trim()) {
-      alert('Please enter a match code')
+      showWarning('Missing Code', 'Enter a match code to join.')
       return
     }
 
@@ -887,7 +896,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
         pollCleanupRef.current()
         pollCleanupRef.current = null
       }
-      alert(error instanceof Error ? error.message : 'Failed to join match')
+      showError('Join Failed', error instanceof Error ? error.message : 'Failed to join match', 'Check the code and try again.')
       setIsLoading(false)
       setIsJoining(false)
       cleanupMatchState()
@@ -1109,7 +1118,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
       const walletAddress = getWalletAddress()
       if (!walletAddress) {
         setIsLoading(false)
-        alert('Wallet address not available. Please ensure your wallet is connected.')
+        showError('Wallet Missing', 'Connect your wallet to continue.', 'Refresh the page if the issue persists.')
         return
       }
 
@@ -1166,7 +1175,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
     } catch (error) {
       console.error('Error setting ready status:', error)
       setIsLoading(false)
-      alert(error instanceof Error ? error.message : 'Failed to set ready status')
+      showError('Ready Failed', error instanceof Error ? error.message : 'Failed to set ready status', 'Try clicking Ready again.')
     }
   }
 
@@ -1296,7 +1305,7 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
       setIsLoading(false)
       setIsHosting(false)
       setIsJoining(false)
-      alert(error instanceof Error ? error.message : 'Failed to start game. Please try again.')
+      showError('Start Failed', error instanceof Error ? error.message : 'Failed to start game', 'Try again or reload the page.')
     }
   }
   
@@ -1417,6 +1426,24 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
         />
       )}
       
+      {/* Send Tokens Modal */}
+      <SendTokensModal
+        isOpen={showSendModal}
+        onClose={() => setShowSendModal(false)}
+        initialTokenType={sendModalTokenType}
+        solBalance={solBalance}
+        packsBalance={packsBalance}
+        walletAddress={getWalletAddress() || ''}
+        onTransactionComplete={() => {
+          // Trigger balance refresh after successful transaction
+          // The balance fetch effect runs every 30 seconds, but we can force it
+          // by updating the state to trigger a re-render
+          setSolBalance(null)
+          setPacksBalance(null)
+          setBalancesLoading(true)
+        }}
+      />
+      
       {/* Stats Header Bar */}
       <div className="stats-header-bar">
         {metricsLoading && (
@@ -1512,9 +1539,16 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
               </span>
             </div>
             
-            {/* Wallet Balances */}
+            {/* Wallet Balances - Clickable to open send modal */}
             <span className="user-info-separator">|</span>
-            <div className="user-info-item">
+            <div 
+              className="user-info-item wallet-address-clickable" 
+              onClick={() => {
+                setSendModalTokenType('SOL')
+                setShowSendModal(true)
+              }}
+              title="Click to send SOL"
+            >
               <span className="user-info-label">◎ SOL:</span>
               <span className="user-info-value" style={{ 
                 color: solBalance !== null && solBalance < 0.01 ? '#ff6b6b' : '#00ff00'
@@ -1524,7 +1558,14 @@ export function Dashboard({ onEnterGame }: DashboardProps) {
             </div>
             
             <span className="user-info-separator">|</span>
-            <div className="user-info-item">
+            <div 
+              className="user-info-item wallet-address-clickable" 
+              onClick={() => {
+                setSendModalTokenType('PACKS')
+                setShowSendModal(true)
+              }}
+              title="Click to send PACKS"
+            >
               <span className="user-info-label">🎒 PACKS:</span>
               <span className="user-info-value" style={{ 
                 color: packsBalance !== null && packsBalance < 1 ? '#ff6b6b' : '#00ff00'

@@ -86,6 +86,14 @@ controls.minDistance = fixedCameraDistance;
 controls.maxDistance = fixedCameraDistance;
 controls.enableZoom = false; // Disable zoom to maintain fixed distance
 
+// Constrain vertical camera angle to prevent viewing below the ground
+// minPolarAngle: minimum angle from top (0 = looking straight down)
+// maxPolarAngle: maximum angle from top (Math.PI/2 = horizontal, Math.PI = looking straight up from below)
+// Setting maxPolarAngle to ~75 degrees prevents camera from going below ground level
+// Setting minPolarAngle to ~20 degrees keeps a reasonable top-down limit
+controls.minPolarAngle = Math.PI * 0.15; // ~27 degrees from top - prevents too steep top-down view
+controls.maxPolarAngle = Math.PI * 0.42; // ~75 degrees from top - keeps camera well above ground for visibility
+
 // Lighting - Night setting
 const ambientLight = new THREE.AmbientLight(0x404080, 0.2); // Dim blue ambient light
 scene.add(ambientLight);
@@ -5385,11 +5393,17 @@ window.addEventListener('keydown', (event) => {
             controls.enableZoom = true;
             controls.minDistance = 1;
             controls.maxDistance = 500;
+            // Relax polar angle constraints for free camera mode
+            controls.minPolarAngle = 0;
+            controls.maxPolarAngle = Math.PI;
         } else {
             // Return to character follow mode - disable zoom and lock distance
             controls.enableZoom = false;
             controls.minDistance = fixedCameraDistance;
             controls.maxDistance = fixedCameraDistance;
+            // Restore polar angle constraints to prevent viewing below ground
+            controls.minPolarAngle = Math.PI * 0.15; // ~27 degrees from top
+            controls.maxPolarAngle = Math.PI * 0.42; // ~75 degrees from top
             
             // Smoothly return camera to character position
             if (farmer) {
@@ -5454,9 +5468,10 @@ window.addEventListener('playerRespawn', ((event: CustomEvent<{ position: THREE.
 
 // Animation loop
 const clock = new THREE.Clock();
+let animationFrameId: number | null = null;
 
 function animate(): void {
-    requestAnimationFrame(animate);
+    animationFrameId = requestAnimationFrame(animate);
     
     const delta = clock.getDelta();
     
@@ -5841,4 +5856,45 @@ export function getCurrentRoomId(): number | null {
  */
 export function getCurrentSceneType(): 'city' | 'growRoomA' | 'growRoomB' | null {
     return currentSceneType;
+}
+
+/**
+ * Destroy the scene and clean up all resources.
+ * Called when exiting to dashboard after match completion.
+ */
+export function destroyScene(): void {
+    console.log('[Scene] Destroying scene and cleaning up resources...');
+    
+    // Stop animation loop
+    if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+    }
+    
+    // Destroy city scene if exists
+    if (cityScene) {
+        cityScene.destroy();
+        cityScene = null;
+    }
+    
+    // Clear identity store
+    identityStore.clearIdentity();
+    
+    // Reset scene state
+    currentRoomId = null;
+    currentSceneType = null;
+    hasInitialSpawned = false;
+    
+    // Remove renderer from DOM
+    if (canvasContainer && renderer.domElement.parentElement === canvasContainer) {
+        canvasContainer.removeChild(renderer.domElement);
+    }
+    if (canvasContainer && labelRenderer.domElement.parentElement === canvasContainer) {
+        canvasContainer.removeChild(labelRenderer.domElement);
+    }
+    
+    // Reset farmer reference
+    farmer = null;
+    
+    console.log('[Scene] Scene destroyed successfully');
 }
