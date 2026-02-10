@@ -144,8 +144,8 @@ export async function rpcRoutes(fastify: FastifyInstance) {
       const data = await response.json()
       return reply.send(data)
       
-    } catch (error) {
-      fastify.log.error('[RPC Proxy] Request failed:', error)
+    } catch (error: unknown) {
+      fastify.log.error({ err: error }, '[RPC Proxy] Request failed')
       return reply.code(502).send({
         jsonrpc: '2.0',
         error: {
