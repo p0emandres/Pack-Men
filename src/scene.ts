@@ -4370,6 +4370,10 @@ function enterRoom(roomId: number): void {
     const roomData = rooms.get(roomId);
     if (!roomData || currentRoomId === roomId) return;
     
+    // Reset capture system when entering a room (safe zone)
+    // This ensures players aren't stuck from stale incapacitated state
+    captureSystem.reset();
+    
     // Exit city scene before entering room
     exitCityScene();
     
@@ -5775,6 +5779,10 @@ export function initScene(identity: PlayerIdentity, container: HTMLElement): voi
     
     // Validate identity cannot be modified at runtime
     Object.freeze(identity);
+    
+    // Reset capture system on scene initialization to clear any stale state
+    // This prevents Player 2 from being stuck due to leftover incapacitated state
+    captureSystem.reset();
     
     // Check if this is demo mode (demo identities have privyUserId starting with "demo-user")
     const isDemoMode = identity.privyUserId.startsWith('demo-user');

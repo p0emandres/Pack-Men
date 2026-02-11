@@ -93,6 +93,147 @@ const modalStyle = `
     line-height: 1.6;
   }
   
+  .how-to-win-container {
+    background: rgba(0, 0, 0, 0.6);
+    border: 2px solid rgba(0, 255, 0, 0.4);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+  }
+  
+  .how-to-win-title {
+    font-size: 14px;
+    text-align: center;
+    color: #00ff00;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    text-shadow: 0 0 10px rgba(0, 255, 0, 0.8);
+    animation: glowPulse 2s ease-in-out infinite;
+  }
+  
+  @keyframes glowPulse {
+    0%, 100% {
+      text-shadow: 0 0 10px rgba(0, 255, 0, 0.8);
+    }
+    50% {
+      text-shadow: 0 0 20px rgba(0, 255, 0, 1), 0 0 30px rgba(0, 255, 0, 0.6);
+    }
+  }
+  
+  .action-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    padding: 0.5rem;
+    background: rgba(0, 255, 0, 0.05);
+    border-radius: 4px;
+    border-left: 3px solid rgba(0, 255, 0, 0.5);
+    transition: all 0.2s ease;
+  }
+  
+  .action-row:hover {
+    background: rgba(0, 255, 0, 0.1);
+    border-left-color: #00ff00;
+  }
+  
+  .action-number {
+    font-size: 16px;
+    min-width: 24px;
+    text-align: center;
+  }
+  
+  .action-content {
+    flex: 1;
+  }
+  
+  .action-name {
+    font-size: 11px;
+    color: #00ff00;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  
+  .action-desc {
+    font-size: 8px;
+    color: rgba(0, 255, 0, 0.7);
+    line-height: 1.4;
+  }
+  
+  .important-section {
+    background: rgba(255, 170, 0, 0.1);
+    border: 1px solid rgba(255, 170, 0, 0.4);
+    border-radius: 4px;
+    padding: 0.75rem;
+    margin-top: 1rem;
+  }
+  
+  .important-title {
+    font-size: 10px;
+    color: #ffaa00;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .important-list {
+    font-size: 8px;
+    color: rgba(255, 170, 0, 0.9);
+    line-height: 1.6;
+    padding-left: 0.5rem;
+  }
+  
+  .important-list li {
+    margin-bottom: 0.25rem;
+    list-style: none;
+    position: relative;
+    padding-left: 1rem;
+  }
+  
+  .important-list li::before {
+    content: '►';
+    position: absolute;
+    left: 0;
+    color: #ffaa00;
+    font-size: 6px;
+  }
+  
+  .win-condition {
+    background: rgba(0, 255, 0, 0.15);
+    border: 2px solid rgba(0, 255, 0, 0.6);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-top: 1rem;
+    text-align: center;
+  }
+  
+  .win-condition-title {
+    font-size: 11px;
+    color: #00ff00;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+    letter-spacing: 2px;
+  }
+  
+  .win-condition-text {
+    font-size: 9px;
+    color: rgba(0, 255, 0, 0.9);
+    line-height: 1.5;
+  }
+  
+  .tagline {
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 8px;
+    color: rgba(0, 255, 0, 0.6);
+    font-style: italic;
+    letter-spacing: 1px;
+  }
+  
   .match-start-modal-button {
     width: 100%;
     padding: 1rem;
@@ -1054,25 +1195,80 @@ export function MatchStartModal({
           <div className="match-start-modal-title">START MATCH</div>
           
           <div className="match-start-modal-content">
-            <div className="match-start-modal-section">
-              <div className="match-start-modal-section-title">MATCH INFO</div>
-              <div className="match-start-modal-section-content">
-                Match ID: {matchId?.substring(0, 20)}...
-                <br />
-                Player A: {playerAWallet.substring(0, 8)}...
-                <br />
-                Player B: {playerBWallet.substring(0, 8)}...
+            {/* How to Win Section */}
+            <div className="how-to-win-container">
+              <div className="how-to-win-title">⚡ HOW TO WIN ⚡</div>
+              
+              <div style={{ fontSize: '9px', color: 'rgba(0, 255, 0, 0.8)', marginBottom: '0.75rem' }}>
+                You have 3 actions:
+              </div>
+              
+              {/* Action 1: Plant */}
+              <div className="action-row">
+                <div className="action-number">🌱</div>
+                <div className="action-content">
+                  <div className="action-name">Plant</div>
+                  <div className="action-desc">
+                    Fill empty slots to grow.<br />
+                    No plants = no points.
+                  </div>
+                </div>
+              </div>
+              
+              {/* Action 2: Harvest */}
+              <div className="action-row">
+                <div className="action-number">✂️</div>
+                <div className="action-content">
+                  <div className="action-name">Harvest</div>
+                  <div className="action-desc">
+                    Collect weed when fully grown.<br />
+                    Don't let ripe flower sit idle.
+                  </div>
+                </div>
+              </div>
+              
+              {/* Action 3: Deliver */}
+              <div className="action-row">
+                <div className="action-number">📦</div>
+                <div className="action-content">
+                  <div className="action-name">Deliver</div>
+                  <div className="action-desc">
+                    Bring the correct flower to an active delivery spot.<br />
+                    Wrong strain = no points.
+                  </div>
+                </div>
+              </div>
+              
+              {/* Important Section */}
+              <div className="important-section">
+                <div className="important-title">⚠️ IMPORTANT</div>
+                <ul className="important-list">
+                  <li>Delivery spots rotate during the match.</li>
+                  <li>Each customer wants a specific strain.</li>
+                  <li>Adapt your planting to match demand.</li>
+                  <li>Getting caught = 25 sec timeout.</li>
+                </ul>
+              </div>
+              
+              {/* Win Condition */}
+              <div className="win-condition">
+                <div className="win-condition-title">🏆 WIN CONDITION</div>
+                <div className="win-condition-text">
+                  Most successful deliveries before time ends wins.
+                </div>
+              </div>
+              
+              <div className="tagline">
+                Stay efficient. Don't waste seconds.
               </div>
             </div>
 
-            <div className="match-start-modal-section">
-              <div className="match-start-modal-section-title">INSTRUCTIONS</div>
-              <div className="match-start-modal-section-content">
-                Click "START MATCH" to initialize the match on-chain.
-                <br />
-                Only one player needs to submit the transaction.
-                <br />
-                The match will begin once the transaction is confirmed.
+            {/* Match Info - Collapsed */}
+            <div className="match-start-modal-section" style={{ marginTop: '1rem', opacity: 0.7 }}>
+              <div className="match-start-modal-section-content" style={{ fontSize: '7px' }}>
+                Match: {matchId?.substring(0, 16)}... | 
+                P1: {playerAWallet.substring(0, 6)}... | 
+                P2: {playerBWallet.substring(0, 6)}...
               </div>
             </div>
           </div>
