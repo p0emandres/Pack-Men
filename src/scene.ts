@@ -644,11 +644,26 @@ function distanceToPolygon(x: number, z: number, corners: { x: number; z: number
     return minDist;
 }
 
+// Seeded random number generator for deterministic plant placement
+function seededRandom(seed: number): () => number {
+    let state = seed;
+    return () => {
+        state = (state * 1103515245 + 12345) & 0x7fffffff;
+        return state / 0x7fffffff;
+    };
+}
+
+// Fixed seed for consistent plant placement across sessions
+const PLANT_SEED = 42069;
+
 // Function to place plants on green tiles
 function placePlantsOnGreenTiles(): void {
     if (plantModels.length === 0) {
         return;
     }
+    
+    // Create seeded random generator for deterministic placement
+    const random = seededRandom(PLANT_SEED);
     
     const greenTilePositions: { x: number; z: number }[] = [];
     const eastEdgeThreshold = halfMapSize - tileSpacing * 0.5; // At the east edge
@@ -684,33 +699,33 @@ function placePlantsOnGreenTiles(): void {
     }
     
     
-    // Place plants on a percentage of green tiles (7.5% coverage for natural look)
-    const plantDensity = 0.075;
+    // Place plants on a percentage of green tiles (3% coverage)
+    const plantDensity = 0.03;
     const tilesToPlacePlants = Math.floor(greenTilePositions.length * plantDensity);
     
-    // Shuffle array to randomize placement
-    const shuffled = [...greenTilePositions].sort(() => Math.random() - 0.5);
+    // Shuffle array using seeded random for deterministic placement
+    const shuffled = [...greenTilePositions].sort(() => random() - 0.5);
     
     let plantsPlaced = 0;
     for (let i = 0; i < Math.min(tilesToPlacePlants, shuffled.length); i++) {
         const tilePos = shuffled[i];
         
-        // Randomly select a plant model
-        const plantModel = plantModels[Math.floor(Math.random() * plantModels.length)];
+        // Select a plant model using seeded random
+        const plantModel = plantModels[Math.floor(random() * plantModels.length)];
         
         // Clone the plant model
         const plant = plantModel.clone();
         
-        // Position plant on the tile with slight random offset
-        const offsetX = (Math.random() - 0.5) * tileSpacing * 0.6; // 60% of tile spacing
-        const offsetZ = (Math.random() - 0.5) * tileSpacing * 0.6;
+        // Position plant on the tile with slight offset (seeded)
+        const offsetX = (random() - 0.5) * tileSpacing * 0.6; // 60% of tile spacing
+        const offsetZ = (random() - 0.5) * tileSpacing * 0.6;
         plant.position.set(tilePos.x + offsetX, 0, tilePos.z + offsetZ);
         
-        // Random rotation around Y axis
-        plant.rotation.y = Math.random() * Math.PI * 2;
+        // Rotation around Y axis (seeded)
+        plant.rotation.y = random() * Math.PI * 2;
         
-        // Random scale variation (6.4 to 9.6) - 8x base scale
-        const scale = (0.8 + Math.random() * 0.4) * 8;
+        // Scale variation (6.4 to 9.6) - 8x base scale (seeded)
+        const scale = (0.8 + random() * 0.4) * 8;
         plant.scale.set(scale, scale, scale);
         
         // Get bounding box to position plant on ground
@@ -813,6 +828,22 @@ plantModelPaths.forEach((path) => {
         path,
         (gltf) => {
             const plantModel = gltf.scene;
+            
+            // Add subtle emissive glow to tree/plant materials to soften shadow sides
+            plantModel.traverse((child) => {
+                if (child instanceof THREE.Mesh && child.material) {
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    materials.forEach((mat) => {
+                        if (mat instanceof THREE.MeshStandardMaterial) {
+                            // Add subtle emissive based on the material's base color to lighten shadows
+                            const baseColor = mat.color.clone();
+                            mat.emissive = baseColor.multiplyScalar(0.15);
+                            mat.emissiveIntensity = 1.0;
+                        }
+                    });
+                }
+            });
+            
             plantModels.push(plantModel);
             plantsLoaded++;
             
