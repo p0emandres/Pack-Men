@@ -60,7 +60,7 @@ export function PlantGrowthDisplayWrapper() {
   const { signTransaction } = useSignTransaction()
   
   // Game toast for themed notifications
-  const { showError, showWarning } = useGameToast()
+  const { showError, showWarning, showSuccess } = useGameToast()
 
   // Check if mobile device
   useEffect(() => {
@@ -639,6 +639,10 @@ export function PlantGrowthDisplayWrapper() {
         console.warn('[PlantGrowthDisplayWrapper] Could not refresh scoreboard:', scoreboardError)
       }
       
+      // Show success notification to player
+      const strainName = strainLevel === 1 ? 'Basic' : strainLevel === 2 ? 'Premium' : 'Exotic'
+      showSuccess('Sale Complete!', `${strainName} strain sold successfully.`)
+      
     } catch (error: any) {
       console.error('[PlantGrowthDisplayWrapper] Delivery failed:', error)
       
@@ -672,7 +676,7 @@ export function PlantGrowthDisplayWrapper() {
       showError(title, message, suggestion)
       throw error // Re-throw so the modal knows it failed
     }
-  }, [matchIdString, playerA, playerB, solanaWallets, signTransaction, showError])
+  }, [matchIdString, playerA, playerB, solanaWallets, signTransaction, showError, showSuccess])
 
   useEffect(() => {
     let roomCheckInterval: NodeJS.Timeout | null = null
