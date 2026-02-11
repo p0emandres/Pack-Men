@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { CaptureEvent } from '../../scenes/city/CopEntities'
+import { dispatchHintTrigger } from '../gameHintsManager'
 
 /**
  * Player state for capture system.
@@ -137,6 +138,9 @@ export class CaptureSystem {
       this.cameraShakeActive = true
       this.cameraShakeIntensity = CAMERA_SHAKE.intensity
       this.cameraShakeStartTime = now
+      
+      // Trigger captured hint for player guidance
+      dispatchHintTrigger('was_captured')
     }
     
     // Notify listeners

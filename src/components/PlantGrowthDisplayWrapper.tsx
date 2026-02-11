@@ -21,6 +21,8 @@ import { useWallets, useSignTransaction } from '@privy-io/react-auth/solana'
 import { MobileControls } from './MobileControls'
 import { useGameToast } from './GameToast'
 import { getPlantErrorMessage, getHarvestErrorMessage } from '../game/errorMessages'
+import { GameHints } from './GameHints'
+import { gameHintsManager, dispatchHintTrigger } from '../game/gameHintsManager'
 
 /**
  * Wrapper component that fetches match state and renders PlantGrowthDisplay
@@ -61,6 +63,53 @@ export function PlantGrowthDisplayWrapper() {
   
   // Game toast for themed notifications
   const { showError, showWarning, showSuccess } = useGameToast()
+
+  // Track previous states for hint triggers
+  const prevIsInRoomRef = useRef<boolean | null>(null)
+  const hasTriggeredMatchStartHint = useRef(false)
+
+  // Trigger hints based on state changes
+  useEffect(() => {
+    // Match start hint - show when match first becomes active
+    if (matchStartTs && !hasTriggeredMatchStartHint.current) {
+      hasTriggeredMatchStartHint.current = true
+      dispatchHintTrigger('match_start')
+    }
+  }, [matchStartTs])
+
+  // Room entry/exit hints
+  useEffect(() => {
+    // Skip initial render
+    if (prevIsInRoomRef.current === null) {
+      prevIsInRoomRef.current = isInRoom
+      return
+    }
+
+    // Detect room state changes
+    if (isInRoom && !prevIsInRoomRef.current) {
+      // Entered grow room
+      dispatchHintTrigger('entered_grow_room')
+    } else if (!isInRoom && prevIsInRoomRef.current) {
+      // Exited to city
+      dispatchHintTrigger('exited_to_city')
+    }
+
+    prevIsInRoomRef.current = isInRoom
+  }, [isInRoom])
+
+  // Inventory opened hint
+  useEffect(() => {
+    if (isInventoryOpen) {
+      dispatchHintTrigger('inventory_opened')
+    }
+  }, [isInventoryOpen])
+
+  // Reset hints manager when component unmounts (new match)
+  useEffect(() => {
+    return () => {
+      gameHintsManager.reset()
+    }
+  }, [])
 
   // Check if mobile device
   useEffect(() => {
@@ -273,6 +322,9 @@ export function PlantGrowthDisplayWrapper() {
       // Clear pending flag on success
       pendingSlotsRef.current.delete(pendingKey)
       
+      // Trigger planted hint
+      dispatchHintTrigger('planted_strain')
+      
       // Remove from isPlanting set after state update completes
       // The subscription or timeout will handle the actual state update
       // We'll remove the planting flag when subscription fires or timeout completes
@@ -452,6 +504,9 @@ export function PlantGrowthDisplayWrapper() {
       // Start first manual refresh after a brief delay
       // The 500ms delay after confirmation + this 1000ms delay gives RPC time to propagate
       setTimeout(() => doManualRefresh(1, 6), 1000)
+      
+      // Trigger harvested hint
+      dispatchHintTrigger('harvested_plant')
       
     } catch (error: any) {
       console.error('[PlantGrowthDisplayWrapper] Harvest failed:', error)
@@ -642,6 +697,9 @@ export function PlantGrowthDisplayWrapper() {
       // Show success notification to player
       const strainName = strainLevel === 1 ? 'Basic' : strainLevel === 2 ? 'Premium' : 'Exotic'
       showSuccess('Sale Complete!', `${strainName} strain sold successfully.`)
+      
+      // Trigger delivery success hint
+      dispatchHintTrigger('made_delivery')
       
     } catch (error: any) {
       console.error('[PlantGrowthDisplayWrapper] Delivery failed:', error)
@@ -1559,6 +1617,9 @@ export function PlantGrowthDisplayWrapper() {
 
       {/* Mobile controls - joystick, sprint, interact, inventory */}
       <MobileControls onInventoryToggle={() => setIsInventoryOpen(prev => !prev)} />
+
+      {/* Contextual game hints - guides players on controls and next steps */}
+      <GameHints isVisible={true} />
     </>
   )
 }

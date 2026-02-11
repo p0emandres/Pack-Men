@@ -17,6 +17,7 @@ import {
     registerGameActiveCallback,
     type InteractionState 
 } from './components/MobileControls';
+import { dispatchHintTrigger, dispatchGameStateChange } from './game/gameHintsManager';
 // WebRTC message format types available in ./types/webrtc.ts
 // All WebRTC messages MUST include peerToken and privyUserId for security
 
@@ -4456,6 +4457,9 @@ function enterRoom(roomId: number): void {
     
     currentRoomId = roomId;
     // Entered room (log removed)
+    
+    // Notify hints system of location change
+    dispatchGameStateChange({ location: 'room' });
 }
 
 // Function to get current player state for presence updates
@@ -4697,6 +4701,9 @@ function exitRoom(): void {
     
     // Enter city scene after exiting room
     enterCityScene();
+    
+    // Notify hints system of location change
+    dispatchGameStateChange({ location: 'city' });
     
     // Exited room (log removed)
 }
@@ -5232,6 +5239,99 @@ function checkDeliveryInteraction(): void {
     }
 }
 
+// Track last proximity hint state to avoid spamming
+let lastProximityHint: string | null = null;
+let proximityHintCooldown = 0;
+
+// Function to check proximity and dispatch contextual hints
+// This runs every frame but only triggers hints when player enters a new proximity zone
+function checkProximityHints(): void {
+    if (!farmer) return;
+    
+    // Cooldown to prevent hint spam
+    if (proximityHintCooldown > 0) {
+        proximityHintCooldown--;
+        return;
+    }
+    
+    const playerPosition = farmer.position.clone();
+    let currentHint: string | null = null;
+    
+    if (currentRoomId !== null) {
+        // IN GROW ROOM
+        const manager = currentRoomId === 1 ? growSlotIndicatorManagerA : growSlotIndicatorManagerB;
+        
+        if (manager.isInitialized) {
+            const slotIndex = manager.checkProximity(playerPosition);
+            
+            if (slotIndex !== null) {
+                // Get slot status from tracker (need to access grow state)
+                // For now, just show generic near_grow_slot hint
+                // TODO: Could check slot status for more specific hints
+                currentHint = `near_grow_slot_${slotIndex}`;
+                if (currentHint !== lastProximityHint) {
+                    // Dispatch a generic grow slot hint
+                    // The actual slot state could be checked via growSlotTracker
+                    dispatchHintTrigger('near_grow_slot_empty');
+                }
+            }
+        }
+        
+        // Check if near door exit
+        const roomData = rooms.get(currentRoomId);
+        if (roomData && roomData.doorExitIndicatorPosition) {
+            let indicatorPosition = new THREE.Vector3();
+            let indicatorRadius = roomData.doorExitIndicatorRadius || 3;
+            
+            // Find indicator in scene or use stored position
+            let indicatorFound = false;
+            roomData.roomGroup.traverse((child) => {
+                if (child.name && child.name.includes(`DoorExitIndicator_${currentRoomId}`)) {
+                    child.updateMatrixWorld(true);
+                    child.getWorldPosition(indicatorPosition);
+                    indicatorFound = true;
+                }
+            });
+            
+            if (!indicatorFound) {
+                roomData.roomGroup.updateMatrixWorld(true);
+                indicatorPosition.copy(roomData.doorExitIndicatorPosition);
+                indicatorPosition.applyMatrix4(roomData.roomGroup.matrixWorld);
+            }
+            
+            const distance = Math.sqrt(
+                Math.pow(playerPosition.x - indicatorPosition.x, 2) +
+                Math.pow(playerPosition.z - indicatorPosition.z, 2)
+            );
+            
+            if (distance <= indicatorRadius * 1.2) {
+                currentHint = 'near_door';
+                if (currentHint !== lastProximityHint) {
+                    dispatchHintTrigger('near_room_door');
+                }
+            }
+        }
+    } else {
+        // IN CITY
+        if (deliveryIndicatorManager.isInitialized) {
+            const customerIndex = deliveryIndicatorManager.checkProximity(playerPosition);
+            
+            if (customerIndex !== null) {
+                currentHint = `near_customer_${customerIndex}`;
+                if (currentHint !== lastProximityHint) {
+                    dispatchHintTrigger('near_customer');
+                }
+            }
+        }
+    }
+    
+    // Update last hint and set cooldown when hint changes
+    if (currentHint !== lastProximityHint) {
+        lastProximityHint = currentHint;
+        proximityHintCooldown = 60; // ~1 second cooldown at 60fps
+    }
+}
+
 // Load Wall.glb
 loader.load(
     '/hq/Wall.glb',
@@ -5704,6 +5804,9 @@ function animate(): void {
         
         // Constrain camera within room boundaries (only when not in free camera mode)
         constrainCameraInRoom();
+        
+        // Check proximity for contextual hints
+        checkProximityHints();
     }
     
     controls.update();
