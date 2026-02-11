@@ -5,7 +5,7 @@
  * - City scene: packmen.mp3
  * - Grow room: Packmen_Lounge.mp3
  * 
- * Music plays subtly on loop with crossfade transitions.
+ * Music plays once per scene entry with crossfade transitions (no loop).
  */
 
 type SceneType = 'city' | 'growRoomA' | 'growRoomB' | null
@@ -31,14 +31,14 @@ class AudioManager {
   initialize(): void {
     if (this.isInitialized) return
 
-    // Create audio elements
+    // Create audio elements (no loop - plays once per scene entry)
     this.cityAudio = new Audio(CITY_TRACK)
-    this.cityAudio.loop = true
+    this.cityAudio.loop = false
     this.cityAudio.volume = 0
     this.cityAudio.preload = 'auto'
 
     this.roomAudio = new Audio(ROOM_TRACK)
-    this.roomAudio.loop = true
+    this.roomAudio.loop = false
     this.roomAudio.volume = 0
     this.roomAudio.preload = 'auto'
 
@@ -123,8 +123,9 @@ class AudioManager {
     const stepDuration = FADE_DURATION / steps
     let step = 0
 
-    // Start the fade-in track if not playing
-    if (fadeInTrack && fadeInTrack.paused) {
+    // Start the fade-in track from the beginning (plays once per scene entry)
+    if (fadeInTrack) {
+      fadeInTrack.currentTime = 0 // Reset to start
       fadeInTrack.volume = 0
       fadeInTrack.play().catch((error) => {
         if (error.name !== 'NotAllowedError') {
