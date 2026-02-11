@@ -22,7 +22,7 @@ import {
 
 // Scene setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0a1a); // Dark night sky background
+scene.background = new THREE.Color(0x1a2040); // Lighter twilight sky background
 
 // Main map group - contains all outdoor map objects
 const mainMapGroup = new THREE.Group();
@@ -94,11 +94,11 @@ controls.enableZoom = false; // Disable zoom to maintain fixed distance
 controls.minPolarAngle = Math.PI * 0.15; // ~27 degrees from top - prevents too steep top-down view
 controls.maxPolarAngle = Math.PI * 0.42; // ~75 degrees from top - keeps camera well above ground for visibility
 
-// Lighting - Night setting
-const ambientLight = new THREE.AmbientLight(0x404080, 0.2); // Dim blue ambient light
+// Lighting - Brighter twilight setting for better visibility
+const ambientLight = new THREE.AmbientLight(0x6080c0, 0.6); // Brighter blue ambient light
 scene.add(ambientLight);
 
-const directionalLight = new THREE.DirectionalLight(0xb0c0ff, 0.4); // Moonlight color and intensity
+const directionalLight = new THREE.DirectionalLight(0xd0e0ff, 0.8); // Brighter moonlight color and intensity
 directionalLight.position.set(150, 150, 75);
 directionalLight.castShadow = true;
 directionalLight.shadow.mapSize.width = 2048;
@@ -5354,9 +5354,6 @@ loader.load(
     }
 );
 
-// Add axes helper for reference
-const axesHelper = new THREE.AxesHelper(5);
-scene.add(axesHelper);
 
 // Log keyboard shortcuts
 
